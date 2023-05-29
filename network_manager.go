@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-05-24 11:47:01
-// @ LastEditTime : 2023-05-29 10:56:56
+// @ LastEditTime : 2023-05-29 11:02:04
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -11,7 +11,7 @@
 package gonmcli
 /*
 #cgo CFLAGS: -I.
-#cgo LDFLAGS: -L${SRCDIR} -lnetwork
+#cgo LDFLAGS: -L${SRCDIR} -lgonmcli
 #include "network.h"
 */
 import "C"
