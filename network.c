@@ -1,7 +1,7 @@
 /**
  * @Author: Eacher
  * @Date:   2023-05-22 10:42:36
- * @LastEditTime:   2023-05-29 10:56:11
+ * @LastEditTime:   2023-05-30 14:41:20
  * @LastEditors:    Eacher
  * --------------------------------------------------------------------------------------------------------------------<
  * @Description:  gcc 编译动态库： gcc -shared -fPIC -o libgonmcli.so network.c `pkg-config --cflags --libs libnm`
@@ -58,8 +58,6 @@ void wifiScanCallback(GObject* object, GAsyncResult* res, gpointer data) {
                 GBytes *ssid        = nm_access_point_get_ssid(list->pdata[i]);
                 if (ssid)
                     wd.ssid    = nm_utils_ssid_to_utf8(g_bytes_get_data(ssid, NULL), g_bytes_get_size(ssid));
-                else
-                    wd.ssid    = nm_utils_uuid_generate();
                 wd.freq        = nm_access_point_get_frequency(list->pdata[i]);
                 wd.bitrate     = nm_access_point_get_max_bitrate(list->pdata[i]);
                 wd.flags       = nm_access_point_get_flags(list->pdata[i]);
@@ -69,7 +67,10 @@ void wifiScanCallback(GObject* object, GAsyncResult* res, gpointer data) {
                                 mode == NM_802_11_MODE_INFRA ? "Infrastructure" : "Unknown";
                 wd.dbus_path   = nm_object_get_path(NM_OBJECT(list->pdata[i]));
                 scanCallBackFunc("runFunc", (guint)i, &wd);
-                g_free(wd.ssid);
+                if (NULL != wd.ssid) {
+                    g_free(wd.ssid);
+                    wd.ssid = NULL;
+                }
             }
             scanCallBackFunc("close", 0, NULL);
         }
@@ -97,3 +98,65 @@ int wifiScanAsync() {
 }
 
 /*************************************************************** WIFI End *********************************************************************/
+
+/************************************************************* Device Start *******************************************************************/
+
+// GoLang 实现该回调函数
+extern void deviceMonitorCallBackFunc(const char *funcName, const char *devName, guint n);
+void device_state(NMDevice *device, GParamSpec *pspec, NMClient *client);
+void device_state(NMDevice *device, GParamSpec *pspec, NMClient *client){
+    deviceMonitorCallBackFunc("device_state", nm_device_get_iface(device), (guint)nm_device_get_state(device));
+}
+void device_ac(NMDevice *device, GParamSpec *pspec, NMClient *client);
+void device_ac(NMDevice *device, GParamSpec *pspec, NMClient *client) {
+    deviceMonitorCallBackFunc("device_ac", nm_device_get_iface(device), (guint)nm_device_get_state(device));
+}
+
+void removeDeviceMonitor(const char *iface) {
+    NMDevice *dev = nm_client_get_device_by_iface(client, iface);
+    if (NULL != dev) {
+        g_signal_handlers_disconnect_by_func(dev, device_state, client);
+        g_signal_handlers_disconnect_by_func(dev, device_ac, client); 
+    }
+}
+
+int notifyDeviceMonitor(const char *iface, char *type, char *bssid, char *connId) {
+    NMDevice *dev = nm_client_get_device_by_iface(client, iface);
+    if (NULL == dev)
+        return 0;
+    switch (nm_device_get_device_type(dev)) {
+    case NM_DEVICE_TYPE_ETHERNET:
+        type = g_strdup("ethernet");
+        break;
+    case NM_DEVICE_TYPE_WIFI:
+        type = g_strdup("wifi");
+        break;
+    case NM_DEVICE_TYPE_MODEM:
+        type = g_strdup("modem");
+        break;
+    case NM_DEVICE_TYPE_BOND:
+        type = g_strdup("bond");
+        break;
+    case NM_DEVICE_TYPE_VLAN:
+        type = g_strdup("vlan");
+        break;
+    case NM_DEVICE_TYPE_BRIDGE:
+        type = g_strdup("bridge");
+        break;
+    case NM_DEVICE_TYPE_GENERIC:
+        type = g_strdup("generic");
+        break;
+    default:
+        type = g_strdup("unknown");
+        break;
+    }
+    bssid = g_strdup(nm_device_get_hw_address(dev));
+    connId = g_strdup(nm_active_connection_get_id(nm_device_get_active_connection(dev)));
+    g_signal_connect (dev, "notify::" "state", G_CALLBACK(device_state), client);
+    g_signal_connect (dev, "notify::" "active-connection", G_CALLBACK(device_ac), client);
+    return 1;
+}
+
+
+/************************************************************* Device End *******************************************************************/
+

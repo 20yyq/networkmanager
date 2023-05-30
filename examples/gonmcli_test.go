@@ -1,12 +1,12 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-02-20 08:50:39
-// @ LastEditTime : 2023-05-29 10:55:36
+// @ LastEditTime : 2023-05-29 11:06:29
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Linux gonmcli 使用例子
 // @ --------------------------------------------------------------------------------<
-// @ FilePath     : /gonmcli/examples/inotify_test.go
+// @ FilePath     : /gonmcli/examples/gonmcli_test.go
 // @@
 package gonmcli_test
 
