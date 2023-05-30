@@ -21,7 +21,7 @@ void quitLoop();
 int wifiScanAsync();
 
 // Devices func
-int notifyDeviceMonitor(const char *iface, char *type, char *bssid, char *connId);
+int notifyDeviceMonitor(const char *iface, char **type, char **bssid, char **connId);
 void removeDeviceMonitor(const char *iface);
 
 #endif /* __go_network_h */

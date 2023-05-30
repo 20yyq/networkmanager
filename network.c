@@ -1,7 +1,7 @@
 /**
  * @Author: Eacher
  * @Date:   2023-05-22 10:42:36
- * @LastEditTime:   2023-05-30 14:41:20
+ * @LastEditTime:   2023-05-30 15:11:08
  * @LastEditors:    Eacher
  * --------------------------------------------------------------------------------------------------------------------<
  * @Description:  gcc 编译动态库： gcc -shared -fPIC -o libgonmcli.so network.c `pkg-config --cflags --libs libnm`
@@ -120,38 +120,38 @@ void removeDeviceMonitor(const char *iface) {
     }
 }
 
-int notifyDeviceMonitor(const char *iface, char *type, char *bssid, char *connId) {
+int notifyDeviceMonitor(const char *iface, char **type, char **bssid, char **connId) {
     NMDevice *dev = nm_client_get_device_by_iface(client, iface);
     if (NULL == dev)
         return 0;
     switch (nm_device_get_device_type(dev)) {
     case NM_DEVICE_TYPE_ETHERNET:
-        type = g_strdup("ethernet");
+        *type = g_strdup("ethernet");
         break;
     case NM_DEVICE_TYPE_WIFI:
-        type = g_strdup("wifi");
+        *type = g_strdup("wifi");
         break;
     case NM_DEVICE_TYPE_MODEM:
-        type = g_strdup("modem");
+        *type = g_strdup("modem");
         break;
     case NM_DEVICE_TYPE_BOND:
-        type = g_strdup("bond");
+        *type = g_strdup("bond");
         break;
     case NM_DEVICE_TYPE_VLAN:
-        type = g_strdup("vlan");
+        *type = g_strdup("vlan");
         break;
     case NM_DEVICE_TYPE_BRIDGE:
-        type = g_strdup("bridge");
+        *type = g_strdup("bridge");
         break;
     case NM_DEVICE_TYPE_GENERIC:
-        type = g_strdup("generic");
+        *type = g_strdup("generic");
         break;
     default:
-        type = g_strdup("unknown");
+        *type = g_strdup("unknown");
         break;
     }
-    bssid = g_strdup(nm_device_get_hw_address(dev));
-    connId = g_strdup(nm_active_connection_get_id(nm_device_get_active_connection(dev)));
+    *bssid = g_strdup(nm_device_get_hw_address(dev));
+    *connId = g_strdup(nm_active_connection_get_id(nm_device_get_active_connection(dev)));
     g_signal_connect (dev, "notify::" "state", G_CALLBACK(device_state), client);
     g_signal_connect (dev, "notify::" "active-connection", G_CALLBACK(device_ac), client);
     return 1;

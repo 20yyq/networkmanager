@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-05-24 11:47:01
-// @ LastEditTime : 2023-05-30 14:46:27
+// @ LastEditTime : 2023-05-30 15:19:01
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -123,6 +123,21 @@ func scanCallBackFunc(name *C.char, n C.guint, wd *C.WifiData) C.int {
 
 /******************************************** Device Start ********************************************/
 
+const (
+	NM_DEVICE_STATE_UNKNOWN      = 0
+	NM_DEVICE_STATE_UNMANAGED    = 10
+	NM_DEVICE_STATE_UNAVAILABLE  = 20
+	NM_DEVICE_STATE_DISCONNECTED = 30
+	NM_DEVICE_STATE_PREPARE      = 40
+	NM_DEVICE_STATE_CONFIG       = 50
+	NM_DEVICE_STATE_NEED_AUTH    = 60
+	NM_DEVICE_STATE_IP_CONFIG    = 70
+	NM_DEVICE_STATE_IP_CHECK     = 80
+	NM_DEVICE_STATE_SECONDARIES  = 90
+	NM_DEVICE_STATE_ACTIVATED    = 100
+	NM_DEVICE_STATE_DEACTIVATING = 110
+	NM_DEVICE_STATE_FAILED       = 120
+)
 
 type devEvent struct {
 	TimeFormat 	string
@@ -153,6 +168,26 @@ func deviceMonitorCallBackFunc(funcName *C.char, devName *C.char, n C.guint) {
 	}(C.GoString(funcName), C.GoString(devName), uint32(C.uint(n)))
 }
 
+func RemoveDevEvent(devName string) {
+	devEventMutex.RLock()
+	val, _ := mapsDevEvent[devName]
+	devEventMutex.RUnlock()
+	devEventMutex.Lock()
+	defer devEventMutex.Unlock()
+	if nil != val {
+		C.removeDeviceMonitor(C.CString(val.dev))
+		for {
+			if 10 == len(val.echan) {
+				<-val.echan
+				continue
+			}
+			break
+		}
+		close(val.echan)
+		delete(mapsDevEvent, val.dev)
+	}
+}
+
 func NewDevEvent(devName string) *DeviceMonitorEvent {
 	devEventMutex.RLock()
 	val, _ := mapsDevEvent[devName]
@@ -161,7 +196,7 @@ func NewDevEvent(devName string) *DeviceMonitorEvent {
 	defer devEventMutex.Unlock()
 	if nil == val {
 		var _type, bssid, connId *C.char
-		if 1 != C.notifyDeviceMonitor(C.CString(devName), _type, bssid, connId) {
+		if 1 != C.notifyDeviceMonitor(C.CString(devName), &_type, &bssid, &connId) {
 			return nil
 		}
 		val = &DeviceMonitorEvent{dev: devName, echan: make(chan devEvent, 10)}
@@ -175,7 +210,7 @@ func NewDevEvent(devName string) *DeviceMonitorEvent {
 }
 
 func (dme *DeviceMonitorEvent) Event() string {
-	if de, ok := <- dme.echan; ok {
+	if de, ok := <-dme.echan; ok {
 		switch de.Flags {
 		case NM_DEVICE_STATE_UNMANAGED:
 			return fmt.Sprintf("%s the device is recognized, but not managed by NetworkManager", de.TimeFormat)

@@ -1,4 +1,4 @@
-# inotify
+# Gonmcli
 gonmcli
 ## 简介
 	这是一个基于 NetworkManager 、 libnm 开发的 GoLang 网络管理客户端，实现WIFI管理和网卡设备监听等功能。
