@@ -1,7 +1,7 @@
 /**
  * @Author: Eacher
  * @Date:   2023-05-22 10:42:36
- * @LastEditTime:   2023-05-30 15:11:08
+ * @LastEditTime:   2023-05-31 16:37:20
  * @LastEditors:    Eacher
  * --------------------------------------------------------------------------------------------------------------------<
  * @Description:  gcc 编译动态库： gcc -shared -fPIC -o libgonmcli.so network.c `pkg-config --cflags --libs libnm`
@@ -31,7 +31,27 @@ gboolean init() {
     return TRUE;
 }
 
+// GoLang 实现该回调函数
+extern void setConnectionFunc(ConnData *data);
+extern void setDeviceFunc(DevData *data);
+
+const char *getDeviceType(NMDevice *device);
+const char *getDeviceState(NMDevice *device);
+void swapConnection(NMConnection *conn, ConnData *data);
+void swapDevice(NMDevice *device, DevData *data);
 void runLoop() {
+    ConnData cd;
+    const GPtrArray *connections = nm_client_get_connections(client);
+    for (int i = 0; i < connections->len; i++) {
+        swapConnection(connections->pdata[i], &cd);
+        setConnectionFunc(&cd);
+    }
+    DevData dd;
+    const GPtrArray *devices = nm_client_get_devices(client);
+    for (int i = 0; i < devices->len; i++) {
+        swapDevice(devices->pdata[i], &dd);
+        setDeviceFunc(&dd);
+    }
     g_main_loop_run(loop);
     g_main_loop_unref(loop);
     g_object_unref(client);
@@ -41,6 +61,122 @@ void runLoop() {
 
 void quitLoop() {
     g_main_loop_quit(loop);
+}
+
+void swapConnection(NMConnection *conn, ConnData *data) {
+    data->_type             = nm_connection_get_connection_type(conn);
+    data->dbus_path         = nm_connection_get_path(conn);
+    data->firmware          = "";
+    NMSettingIPConfig *ipConfig = nm_connection_get_setting_ip4_config(conn);
+    if (ipConfig) {
+        data->ipv4_method   = nm_setting_ip_config_get_method(ipConfig);
+        data->ipv4_dns      = nm_setting_ip_config_get_num_dns(ipConfig) ?
+                                nm_setting_ip_config_get_dns(ipConfig, 0) : "nil";
+        data->ipv4_addresses= nm_setting_ip_config_get_num_addresses(ipConfig) ?
+                                nm_ip_address_get_address(nm_setting_ip_config_get_address(ipConfig, 0)) : "nil";
+        data->ipv4_gateway  = nm_setting_ip_config_get_gateway(ipConfig);
+    }
+    NMSettingConnection *setting = nm_connection_get_setting_connection(conn);
+    if (setting) {
+        data->id            = nm_setting_connection_get_id(setting);
+        data->uuid          = nm_setting_connection_get_uuid(setting);
+        data->priority      = nm_setting_connection_get_autoconnect_priority(setting);
+        data->autoconnect   = nm_setting_connection_get_autoconnect(setting);
+    }
+}
+
+void swapDevice(NMDevice *device, DevData *data) {
+    data->iface = nm_device_get_ip_iface(device);
+    data->_type = getDeviceType(device);
+    data->udi = nm_device_get_udi(device);
+    data->driver = nm_device_get_driver(device);
+    data->firmware = nm_device_get_firmware_version(device);
+    data->hw_address = nm_device_get_hw_address(device);
+    data->state = getDeviceState(device);
+    NMActiveConnection *ac = nm_device_get_active_connection(device);
+    data->uuid = "";
+    if (ac) data->uuid = nm_active_connection_get_uuid(ac);
+    data->autoconnect = nm_device_get_autoconnect(device);
+    data->real = nm_device_is_real(device);
+    data->software = nm_device_is_software(device);
+}
+
+const char *getDeviceType(NMDevice *device) {
+    const char *type;
+    switch (nm_device_get_device_type(device)) {
+    case NM_DEVICE_TYPE_ETHERNET:
+        type = "ethernet";
+        break;
+    case NM_DEVICE_TYPE_WIFI:
+        type = "wifi";
+        break;
+    case NM_DEVICE_TYPE_MODEM:
+        type = "modem";
+        break;
+    case NM_DEVICE_TYPE_BOND:
+        type = "bond";
+        break;
+    case NM_DEVICE_TYPE_VLAN:
+        type = "vlan";
+        break;
+    case NM_DEVICE_TYPE_BRIDGE:
+        type = "bridge";
+        break;
+    case NM_DEVICE_TYPE_GENERIC:
+        type = "generic";
+        break;
+    default:
+        type = "unknown";
+        break;
+    }
+    return type;
+}
+
+const char *getDeviceState(NMDevice *device) {
+    const char *state;
+    switch (nm_device_get_state(device)) {
+    case NM_DEVICE_STATE_UNMANAGED:
+        state = "unmanaged";
+        break;
+    case NM_DEVICE_STATE_UNAVAILABLE:
+        state = "unavailable";
+        break;
+    case NM_DEVICE_STATE_DISCONNECTED:
+        state = "disconnected";
+        break;
+    case NM_DEVICE_STATE_PREPARE:
+        state = "prepare";
+        break;
+    case NM_DEVICE_STATE_CONFIG:
+        state = "config";
+        break;
+    case NM_DEVICE_STATE_NEED_AUTH:
+        state = "need auth";
+        break;
+    case NM_DEVICE_STATE_IP_CONFIG:
+        state = "ip config";
+        break;
+    case NM_DEVICE_STATE_IP_CHECK:
+        state = "ip check";
+        break;
+    case NM_DEVICE_STATE_SECONDARIES:
+        state = "secondaries";
+        break;
+    case NM_DEVICE_STATE_ACTIVATED:
+        state = "activated";
+        break;
+    case NM_DEVICE_STATE_DEACTIVATING:
+        state = "deactivating";
+        break;
+    case NM_DEVICE_STATE_FAILED:
+        state = "failed";
+        break;
+    case NM_DEVICE_STATE_UNKNOWN:
+    default:
+        state = "unknown";
+        break;
+    }
+    return state;
 }
 
 /*************************************************************** WIFI Start *********************************************************************/
@@ -102,14 +238,14 @@ int wifiScanAsync() {
 /************************************************************* Device Start *******************************************************************/
 
 // GoLang 实现该回调函数
-extern void deviceMonitorCallBackFunc(const char *funcName, const char *devName, guint n);
+extern void deviceMonitorCallBackFunc(const char *funcName, const char *devName, const char *state, guint n);
 void device_state(NMDevice *device, GParamSpec *pspec, NMClient *client);
 void device_state(NMDevice *device, GParamSpec *pspec, NMClient *client){
-    deviceMonitorCallBackFunc("device_state", nm_device_get_iface(device), (guint)nm_device_get_state(device));
+    deviceMonitorCallBackFunc("device_state", nm_device_get_iface(device), getDeviceState(device), (guint)nm_device_get_state(device));
 }
 void device_ac(NMDevice *device, GParamSpec *pspec, NMClient *client);
 void device_ac(NMDevice *device, GParamSpec *pspec, NMClient *client) {
-    deviceMonitorCallBackFunc("device_ac", nm_device_get_iface(device), (guint)nm_device_get_state(device));
+    deviceMonitorCallBackFunc("device_ac", nm_device_get_iface(device), getDeviceState(device), (guint)nm_device_get_state(device));
 }
 
 void removeDeviceMonitor(const char *iface) {
@@ -124,32 +260,7 @@ int notifyDeviceMonitor(const char *iface, char **type, char **bssid, char **con
     NMDevice *dev = nm_client_get_device_by_iface(client, iface);
     if (NULL == dev)
         return 0;
-    switch (nm_device_get_device_type(dev)) {
-    case NM_DEVICE_TYPE_ETHERNET:
-        *type = g_strdup("ethernet");
-        break;
-    case NM_DEVICE_TYPE_WIFI:
-        *type = g_strdup("wifi");
-        break;
-    case NM_DEVICE_TYPE_MODEM:
-        *type = g_strdup("modem");
-        break;
-    case NM_DEVICE_TYPE_BOND:
-        *type = g_strdup("bond");
-        break;
-    case NM_DEVICE_TYPE_VLAN:
-        *type = g_strdup("vlan");
-        break;
-    case NM_DEVICE_TYPE_BRIDGE:
-        *type = g_strdup("bridge");
-        break;
-    case NM_DEVICE_TYPE_GENERIC:
-        *type = g_strdup("generic");
-        break;
-    default:
-        *type = g_strdup("unknown");
-        break;
-    }
+    *type = g_strdup(getDeviceType(dev));
     *bssid = g_strdup(nm_device_get_hw_address(dev));
     *connId = g_strdup(nm_active_connection_get_id(nm_device_get_active_connection(dev)));
     g_signal_connect (dev, "notify::" "state", G_CALLBACK(device_state), client);

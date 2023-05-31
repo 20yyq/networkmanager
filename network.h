@@ -13,6 +13,34 @@ typedef struct {
     const char *dbus_path;
 } WifiData;
 
+typedef struct {
+    const char  *id;
+    const char  *uuid;
+    const char  *_type;
+    const char  *dbus_path;
+    const char  *firmware;
+    gboolean    autoconnect;
+    int         priority;
+    const char  *ipv4_method;
+    const char  *ipv4_dns;
+    const char  *ipv4_addresses;
+    const char  *ipv4_gateway;
+} ConnData;
+
+typedef struct {
+    const char  *iface;
+    const char  *_type;
+    const char  *udi;
+    const char  *driver;
+    const char  *firmware;
+    const char  *hw_address;
+    const char  *state;
+    const char  *uuid;
+    gboolean    autoconnect;
+    gboolean    real;
+    gboolean    software;
+} DevData;
+
 gboolean init();
 void runLoop();
 void quitLoop();

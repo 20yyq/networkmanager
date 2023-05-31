@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-05-24 11:47:01
-// @ LastEditTime : 2023-05-30 15:19:01
+// @ LastEditTime : 2023-05-31 16:41:39
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -23,9 +23,29 @@ import (
 	"time"
 )
 
+const cycle = 60 * 1
+var scanTimestamp int64
+var primaryClient *clients
+
+type clients struct {
+	primary 	*client
+	rwmutex		sync.RWMutex
+	scanMutex 	sync.Mutex
+	maps 		map[*client]bool
+	scanList 	[]WifiInfo
+	scanNotify 	chan bool
+}
+
 func NMStart() error {
 	if 1 != C.int(C.init()) {
 		return nil
+	}
+	primaryClient = &clients{
+		primary: &client{
+			connList: make([]*Connection, 0),
+			devList: make([]*Device, 0),
+		},
+		maps: make(map[*client]bool),
 	}
 	mapsDevEvent = make(map[string]*DeviceMonitorEvent)
 	go C.runLoop()
@@ -37,11 +57,60 @@ func NMQuit() error {
 	return nil
 }
 
+//export setConnectionFunc
+func setConnectionFunc(cd *C.ConnData) {
+	conn := &Connection{
+		id:		C.GoString(cd.id),
+		uuid:	C.GoString(cd.uuid),
+		_type:	C.GoString(cd._type),
+		dbus_path:		C.GoString(cd.dbus_path),
+		firmware:		C.GoString(cd.firmware),
+		priority:		int32(cd.priority),
+		ipv4_method:	C.GoString(cd.ipv4_method),
+		ipv4_dns:		C.GoString(cd.ipv4_dns),
+		ipv4_addresses:	C.GoString(cd.ipv4_addresses),
+		ipv4_gateway:	C.GoString(cd.ipv4_gateway),
+	}
+	if 1 == C.int(cd.autoconnect) {
+		conn.autoconnect = true
+	}
+	primaryClient.primary.connList = append(primaryClient.primary.connList, conn)
+}
+
+//export setDeviceFunc
+func setDeviceFunc(dd *C.DevData) {
+	dev := &Device{
+		iface:		C.GoString(dd.iface),
+		_type:		C.GoString(dd._type),
+		udi:		C.GoString(dd.udi),
+		driver:		C.GoString(dd.driver),
+		firmware:	C.GoString(dd.firmware),
+		hw_address:	C.GoString(dd.hw_address),
+		state:		C.GoString(dd.state),
+	}
+	if 1 == C.int(dd.autoconnect) {
+		dev.autoconnect = true
+	}
+	if 1 == C.int(dd.real) {
+		dev.real = true
+	}
+	if 1 == C.int(dd.software) {
+		dev.software = true
+	}
+	if uuid := C.GoString(dd.uuid); uuid != "" {
+		for i := 0; i < len(primaryClient.primary.connList); i++ {
+			if primaryClient.primary.connList[i].uuid == uuid {
+				dev.conn = primaryClient.primary.connList[i]
+				primaryClient.primary.connList[i].dev = dev
+				break
+			}
+		}
+	}
+	primaryClient.primary.devList = append(primaryClient.primary.devList, dev)
+}
+
 /******************************************** WIFI Start ********************************************/
 
-const cycle = 60 * 1
-var scanTimestamp int64
-var scanList []WifiInfo
 type WifiInfo struct {
 	idx 		uint
 	dBusPath 	string
@@ -54,24 +123,22 @@ type WifiInfo struct {
 	Bitrate 	string	`json:"bitrate"`
 }
 
-var scanMutex sync.Mutex
-var scanNotify chan bool = nil
-func NMScan(update bool) []WifiInfo {
-	scanMutex.Lock()
-	defer scanMutex.Unlock()
+func (cls *clients) wifiScan(update bool) []WifiInfo {
+	cls.scanMutex.Lock()
+	defer cls.scanMutex.Unlock()
 	if update || (scanTimestamp + cycle) < time.Now().Unix() {
 		scanTimestamp = time.Now().Unix()
 		scanNum := 0
-		scanNotify = make(chan bool)
+		cls.scanNotify = make(chan bool)
 		for {
 			if 1 != C.wifiScanAsync() {
-				go func() { scanNotify <- true }()
+				go func() { cls.scanNotify <- true }()
 			}
-			if is := <-scanNotify; is {
+			if is := <-cls.scanNotify; is {
 				fmt.Println("loop")
 				time.Sleep(time.Millisecond * 100)
 				if scanNum++; 3 < scanNum {
-					close(scanNotify)
+					close(cls.scanNotify)
 					fmt.Println("error")
 					break
 				}
@@ -80,10 +147,10 @@ func NMScan(update bool) []WifiInfo {
 			fmt.Println("success")
 			break
 		}
-		scanNotify = nil
+		cls.scanNotify = nil
 	}
-	l := make([]WifiInfo, len(scanList))
-	copy(l, scanList)
+	l := make([]WifiInfo, len(cls.scanList))
+	copy(l, cls.scanList)
 	return l
 }
 
@@ -94,25 +161,25 @@ func scanCallBackFunc(name *C.char, n C.guint, wd *C.WifiData) C.int {
 	case "start":
 		if 2 > i {
 			i = 0
-			go func() { scanNotify <- true }()
+			go func() { primaryClient.scanNotify <- true }()
 			break
 		}
-		scanList = make([]WifiInfo, i)
+		primaryClient.scanList = make([]WifiInfo, i)
 		i = 1
 	case "runFunc":
-		scanList[i].idx, scanList[i].Ssid =	i, "nil"
+		primaryClient.scanList[i].idx, primaryClient.scanList[i].Ssid =	i, "nil"
 		if wd.ssid != nil {
-			scanList[i].Ssid=	C.GoString(wd.ssid)
+			primaryClient.scanList[i].Ssid=	C.GoString(wd.ssid)
 		}
-		scanList[i].Bssid 	=	C.GoString(wd.bssid)
-		scanList[i].Mode 	=	C.GoString(wd.mode)
-		scanList[i].Flags 	=	uint8(C.int(wd.flags))
-		scanList[i].Strength=	uint8(C.int(wd.strength))
-		scanList[i].Freq 	=	strconv.FormatInt(int64(C.uint(wd.freq)), 10) + " MHz"
-		scanList[i].Bitrate =	strconv.FormatInt(int64(C.uint(wd.bitrate) / 1000), 10) + " Mbit/s"
-		scanList[i].dBusPath=	C.GoString(wd.dbus_path)
+		primaryClient.scanList[i].Bssid 	=	C.GoString(wd.bssid)
+		primaryClient.scanList[i].Mode 	=	C.GoString(wd.mode)
+		primaryClient.scanList[i].Flags 	=	uint8(C.int(wd.flags))
+		primaryClient.scanList[i].Strength=	uint8(C.int(wd.strength))
+		primaryClient.scanList[i].Freq 	=	strconv.FormatInt(int64(C.uint(wd.freq)), 10) + " MHz"
+		primaryClient.scanList[i].Bitrate =	strconv.FormatInt(int64(C.uint(wd.bitrate) / 1000), 10) + " Mbit/s"
+		primaryClient.scanList[i].dBusPath=	C.GoString(wd.dbus_path)
 	case "close":
-		close(scanNotify)
+		close(primaryClient.scanNotify)
 	default:
 
 	}
@@ -123,25 +190,10 @@ func scanCallBackFunc(name *C.char, n C.guint, wd *C.WifiData) C.int {
 
 /******************************************** Device Start ********************************************/
 
-const (
-	NM_DEVICE_STATE_UNKNOWN      = 0
-	NM_DEVICE_STATE_UNMANAGED    = 10
-	NM_DEVICE_STATE_UNAVAILABLE  = 20
-	NM_DEVICE_STATE_DISCONNECTED = 30
-	NM_DEVICE_STATE_PREPARE      = 40
-	NM_DEVICE_STATE_CONFIG       = 50
-	NM_DEVICE_STATE_NEED_AUTH    = 60
-	NM_DEVICE_STATE_IP_CONFIG    = 70
-	NM_DEVICE_STATE_IP_CHECK     = 80
-	NM_DEVICE_STATE_SECONDARIES  = 90
-	NM_DEVICE_STATE_ACTIVATED    = 100
-	NM_DEVICE_STATE_DEACTIVATING = 110
-	NM_DEVICE_STATE_FAILED       = 120
-)
-
 type devEvent struct {
 	TimeFormat 	string
 	FuncName 	string
+	State 		string
 	Flags 		uint32
 }
 
@@ -157,15 +209,15 @@ var devEventMutex sync.RWMutex
 var mapsDevEvent map[string]*DeviceMonitorEvent
 
 //export deviceMonitorCallBackFunc
-func deviceMonitorCallBackFunc(funcName *C.char, devName *C.char, n C.guint) {
-	go func(f, d string, i uint32) {
+func deviceMonitorCallBackFunc(funcName *C.char, devName *C.char, state *C.char, n C.guint) {
+	go func(f, d, s string, i uint32) {
 		devEventMutex.RLock()
 		val, _ := mapsDevEvent[d]
 		devEventMutex.RUnlock()
 		if val != nil {
-			val.echan <- devEvent{TimeFormat: time.Now().Format(time.DateTime), FuncName: f, Flags: i}
+			val.echan <- devEvent{TimeFormat: time.Now().Format(time.DateTime), FuncName: f, State: s, Flags: i}
 		}
-	}(C.GoString(funcName), C.GoString(devName), uint32(C.uint(n)))
+	}(C.GoString(funcName), C.GoString(devName), C.GoString(state), uint32(C.uint(n)))
 }
 
 func RemoveDevEvent(devName string) {
@@ -211,37 +263,7 @@ func NewDevEvent(devName string) *DeviceMonitorEvent {
 
 func (dme *DeviceMonitorEvent) Event() string {
 	if de, ok := <-dme.echan; ok {
-		switch de.Flags {
-		case NM_DEVICE_STATE_UNMANAGED:
-			return fmt.Sprintf("%s the device is recognized, but not managed by NetworkManager", de.TimeFormat)
-		case NM_DEVICE_STATE_UNAVAILABLE:
-			return fmt.Sprintf("%s the device is managed by NetworkManager, but is not available for use", de.TimeFormat)
-		case NM_DEVICE_STATE_DISCONNECTED:
-			return fmt.Sprintf("%s the device can be activated, but is currently idle and not connected to a network", de.TimeFormat)
-		case NM_DEVICE_STATE_PREPARE:
-			return fmt.Sprintf("%s the device is preparing the connection to the network", de.TimeFormat)
-		case NM_DEVICE_STATE_CONFIG:
-			return fmt.Sprintf("%s the device is connecting to the requested network", de.TimeFormat)
-		case NM_DEVICE_STATE_NEED_AUTH:
-			return fmt.Sprintf("%s the device requires more information to continue connecting to the requested network", de.TimeFormat)
-		case NM_DEVICE_STATE_IP_CONFIG:
-			return fmt.Sprintf("%s the device is requesting IPv4 and/or IPv6 addresses and routing information from the network", de.TimeFormat)
-		case NM_DEVICE_STATE_IP_CHECK:
-			return fmt.Sprintf("%s the device is checking whether further action is required for the requested network connection", de.TimeFormat)
-		case NM_DEVICE_STATE_SECONDARIES:
-			return fmt.Sprintf(`%s the device is waiting for a secondary 
-				connection (like a VPN) which must activated before the device can be activated`, de.TimeFormat)
-		case NM_DEVICE_STATE_ACTIVATED:
-			return fmt.Sprintf("%s the device has a network connection, either local or global", de.TimeFormat)
-		case NM_DEVICE_STATE_DEACTIVATING:
-			return fmt.Sprintf("%s the network connection may still be valid", de.TimeFormat)
-		case NM_DEVICE_STATE_FAILED:
-			return fmt.Sprintf("%s the device failed to connect to the requested network and is cleaning up the connection request", de.TimeFormat)
-		case NM_DEVICE_STATE_UNKNOWN:
-			fallthrough
-		default:
-			return fmt.Sprintf("%s the device's state is unknown", de.TimeFormat)
-		}
+		return fmt.Sprintf("%s %s", de.TimeFormat, de.State)
 	}
 	return fmt.Sprintf("%s Event close", time.Now().Format(time.DateTime))
 }
