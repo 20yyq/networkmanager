@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-05-24 11:47:01
-// @ LastEditTime : 2023-05-31 16:41:39
+// @ LastEditTime : 2023-06-01 15:47:09
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -31,9 +31,11 @@ type clients struct {
 	primary 	*client
 	rwmutex		sync.RWMutex
 	scanMutex 	sync.Mutex
-	maps 		map[*client]bool
 	scanList 	[]WifiInfo
 	scanNotify 	chan bool
+	clientMap 	map[*client]bool
+	eventMutex 	sync.RWMutex
+	eventMap 	map[string]*DeviceMonitorEvent
 }
 
 func NMStart() error {
@@ -45,9 +47,9 @@ func NMStart() error {
 			connList: make([]*Connection, 0),
 			devList: make([]*Device, 0),
 		},
-		maps: make(map[*client]bool),
+		clientMap: make(map[*client]bool),
+		eventMap: make(map[string]*DeviceMonitorEvent),
 	}
-	mapsDevEvent = make(map[string]*DeviceMonitorEvent)
 	go C.runLoop()
 	return nil
 }
@@ -58,46 +60,46 @@ func NMQuit() error {
 }
 
 //export setConnectionFunc
-func setConnectionFunc(cd *C.ConnData) {
+func setConnectionFunc(data *C.ConnData) {
 	conn := &Connection{
-		id:		C.GoString(cd.id),
-		uuid:	C.GoString(cd.uuid),
-		_type:	C.GoString(cd._type),
-		dbus_path:		C.GoString(cd.dbus_path),
-		firmware:		C.GoString(cd.firmware),
-		priority:		int32(cd.priority),
-		ipv4_method:	C.GoString(cd.ipv4_method),
-		ipv4_dns:		C.GoString(cd.ipv4_dns),
-		ipv4_addresses:	C.GoString(cd.ipv4_addresses),
-		ipv4_gateway:	C.GoString(cd.ipv4_gateway),
+		id:		C.GoString(data.id),
+		uuid:	C.GoString(data.uuid),
+		_type:	C.GoString(data._type),
+		dbus_path:		C.GoString(data.dbus_path),
+		firmware:		C.GoString(data.firmware),
+		priority:		int32(data.priority),
+		ipv4_method:	C.GoString(data.ipv4_method),
+		ipv4_dns:		C.GoString(data.ipv4_dns),
+		ipv4_addresses:	C.GoString(data.ipv4_addresses),
+		ipv4_gateway:	C.GoString(data.ipv4_gateway),
 	}
-	if 1 == C.int(cd.autoconnect) {
+	if 1 == C.int(data.autoconnect) {
 		conn.autoconnect = true
 	}
 	primaryClient.primary.connList = append(primaryClient.primary.connList, conn)
 }
 
 //export setDeviceFunc
-func setDeviceFunc(dd *C.DevData) {
+func setDeviceFunc(data *C.DevData) {
 	dev := &Device{
-		iface:		C.GoString(dd.iface),
-		_type:		C.GoString(dd._type),
-		udi:		C.GoString(dd.udi),
-		driver:		C.GoString(dd.driver),
-		firmware:	C.GoString(dd.firmware),
-		hw_address:	C.GoString(dd.hw_address),
-		state:		C.GoString(dd.state),
+		iface:		C.GoString(data.iface),
+		_type:		C.GoString(data._type),
+		udi:		C.GoString(data.udi),
+		driver:		C.GoString(data.driver),
+		firmware:	C.GoString(data.firmware),
+		hw_address:	C.GoString(data.hw_address),
+		state:		C.GoString(data.state),
 	}
-	if 1 == C.int(dd.autoconnect) {
+	if 1 == C.int(data.autoconnect) {
 		dev.autoconnect = true
 	}
-	if 1 == C.int(dd.real) {
+	if 1 == C.int(data.real) {
 		dev.real = true
 	}
-	if 1 == C.int(dd.software) {
+	if 1 == C.int(data.software) {
 		dev.software = true
 	}
-	if uuid := C.GoString(dd.uuid); uuid != "" {
+	if uuid := C.GoString(data.uuid); uuid != "" {
 		for i := 0; i < len(primaryClient.primary.connList); i++ {
 			if primaryClient.primary.connList[i].uuid == uuid {
 				dev.conn = primaryClient.primary.connList[i]
@@ -128,26 +130,28 @@ func (cls *clients) wifiScan(update bool) []WifiInfo {
 	defer cls.scanMutex.Unlock()
 	if update || (scanTimestamp + cycle) < time.Now().Unix() {
 		scanTimestamp = time.Now().Unix()
-		scanNum := 0
-		cls.scanNotify = make(chan bool)
-		for {
-			if 1 != C.wifiScanAsync() {
-				go func() { cls.scanNotify <- true }()
-			}
-			if is := <-cls.scanNotify; is {
-				fmt.Println("loop")
-				time.Sleep(time.Millisecond * 100)
-				if scanNum++; 3 < scanNum {
-					close(cls.scanNotify)
-					fmt.Println("error")
-					break
+		if 1 == C.Permission.ednwifi || 1 == C.Permission.wifi_protected || 1 == C.Permission.wifi_open {
+			scanNum := 0
+			cls.scanNotify = make(chan bool)
+			for {
+				if 1 != C.wifiScanAsync() {
+					go func() { cls.scanNotify <- true }()
 				}
-				continue
+				if is := <-cls.scanNotify; is {
+					fmt.Println("loop")
+					time.Sleep(time.Millisecond * 100)
+					if scanNum++; 3 < scanNum {
+						close(cls.scanNotify)
+						fmt.Println("error")
+						break
+					}
+					continue
+				}
+				fmt.Println("success")
+				break
 			}
-			fmt.Println("success")
-			break
+			cls.scanNotify = nil
 		}
-		cls.scanNotify = nil
 	}
 	l := make([]WifiInfo, len(cls.scanList))
 	copy(l, cls.scanList)
@@ -205,27 +209,22 @@ type DeviceMonitorEvent struct {
 	echan 	chan devEvent
 }
 
-var devEventMutex sync.RWMutex
-var mapsDevEvent map[string]*DeviceMonitorEvent
-
 //export deviceMonitorCallBackFunc
 func deviceMonitorCallBackFunc(funcName *C.char, devName *C.char, state *C.char, n C.guint) {
 	go func(f, d, s string, i uint32) {
-		devEventMutex.RLock()
-		val, _ := mapsDevEvent[d]
-		devEventMutex.RUnlock()
+		primaryClient.eventMutex.RLock()
+		val, _ := primaryClient.eventMap[d]
+		primaryClient.eventMutex.RUnlock()
 		if val != nil {
 			val.echan <- devEvent{TimeFormat: time.Now().Format(time.DateTime), FuncName: f, State: s, Flags: i}
 		}
 	}(C.GoString(funcName), C.GoString(devName), C.GoString(state), uint32(C.uint(n)))
 }
 
-func RemoveDevEvent(devName string) {
-	devEventMutex.RLock()
-	val, _ := mapsDevEvent[devName]
-	devEventMutex.RUnlock()
-	devEventMutex.Lock()
-	defer devEventMutex.Unlock()
+func (cls *clients) removeDevEvent(devName string) {
+	cls.eventMutex.Lock()
+	val, _ := cls.eventMap[devName]
+	defer cls.eventMutex.Unlock()
 	if nil != val {
 		C.removeDeviceMonitor(C.CString(val.dev))
 		for {
@@ -236,16 +235,14 @@ func RemoveDevEvent(devName string) {
 			break
 		}
 		close(val.echan)
-		delete(mapsDevEvent, val.dev)
+		delete(cls.eventMap, val.dev)
 	}
 }
 
-func NewDevEvent(devName string) *DeviceMonitorEvent {
-	devEventMutex.RLock()
-	val, _ := mapsDevEvent[devName]
-	devEventMutex.RUnlock()
-	devEventMutex.Lock()
-	defer devEventMutex.Unlock()
+func (cls *clients) newDevEvent(devName string) *DeviceMonitorEvent {
+	cls.eventMutex.Lock()
+	val, _ := cls.eventMap[devName]
+	defer cls.eventMutex.Unlock()
 	if nil == val {
 		var _type, bssid, connId *C.char
 		if 1 != C.notifyDeviceMonitor(C.CString(devName), &_type, &bssid, &connId) {
@@ -256,7 +253,7 @@ func NewDevEvent(devName string) *DeviceMonitorEvent {
 		C.g_free(C.gpointer(_type))
 		C.g_free(C.gpointer(bssid))
 		C.g_free(C.gpointer(connId))
-		mapsDevEvent[devName] = val
+		cls.eventMap[devName] = val
 	}
 	return val
 }

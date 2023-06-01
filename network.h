@@ -41,6 +41,26 @@ typedef struct {
     gboolean    software;
 } DevData;
 
+typedef struct {
+    int    ednetwork;
+    int    ednwifi;
+    int    edwwan;
+    int    edwimax;
+    int    sleep_wake;
+    int    network_control;
+    int    wifi_protected;
+    int    wifi_open;
+    int    modify_system;
+    int    modify_own;
+    int    modify_hostname;
+    int    modify_dns;
+    int    reload;
+    int    checkpoint;
+    int    edstatic;
+    int    connectivity_check;
+} PermissionData;
+extern PermissionData Permission;
+
 gboolean init();
 void runLoop();
 void quitLoop();

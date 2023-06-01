@@ -1,7 +1,7 @@
 /**
  * @Author: Eacher
  * @Date:   2023-05-22 10:42:36
- * @LastEditTime:   2023-05-31 16:37:20
+ * @LastEditTime:   2023-06-01 15:43:11
  * @LastEditors:    Eacher
  * --------------------------------------------------------------------------------------------------------------------<
  * @Description:  gcc 编译动态库： gcc -shared -fPIC -o libgonmcli.so network.c `pkg-config --cflags --libs libnm`
@@ -14,6 +14,20 @@
 
 GMainLoop   *loop   = NULL;
 NMClient    *client = NULL;
+PermissionData Permission = {
+    .ednetwork = 0, .ednwifi = 0, .edwwan = 0, .edwimax = 0, .sleep_wake = 0, .network_control = 0,
+    .wifi_protected = 0, .wifi_open = 0, .modify_system = 0, .modify_own = 0, .modify_hostname = 0,
+    .modify_dns = 0, .reload = 0, .checkpoint = 0, .edstatic = 0, .connectivity_check = 0,
+};
+
+/********************************** Start **********************************/
+const char *getDeviceType(NMDevice *device);
+const char *getDeviceState(NMDevice *device);
+void swapConnection(NMConnection *conn, ConnData *data);
+void swapDevice(NMDevice *device, DevData *data);
+int checkClientPermission(NMClientPermission p);
+
+/********************************** End **********************************/
 
 gboolean init() {
     if (NULL != client)
@@ -35,10 +49,6 @@ gboolean init() {
 extern void setConnectionFunc(ConnData *data);
 extern void setDeviceFunc(DevData *data);
 
-const char *getDeviceType(NMDevice *device);
-const char *getDeviceState(NMDevice *device);
-void swapConnection(NMConnection *conn, ConnData *data);
-void swapDevice(NMDevice *device, DevData *data);
 void runLoop() {
     ConnData cd;
     const GPtrArray *connections = nm_client_get_connections(client);
@@ -52,6 +62,22 @@ void runLoop() {
         swapDevice(devices->pdata[i], &dd);
         setDeviceFunc(&dd);
     }
+    Permission.ednetwork    = checkClientPermission(NM_CLIENT_PERMISSION_ENABLE_DISABLE_NETWORK);
+    Permission.ednwifi      = checkClientPermission(NM_CLIENT_PERMISSION_ENABLE_DISABLE_WIFI);
+    Permission.edwwan       = checkClientPermission(NM_CLIENT_PERMISSION_ENABLE_DISABLE_WWAN);
+    Permission.edwimax      = checkClientPermission(NM_CLIENT_PERMISSION_ENABLE_DISABLE_WIMAX);
+    Permission.sleep_wake   = checkClientPermission(NM_CLIENT_PERMISSION_SLEEP_WAKE);
+    Permission.network_control= checkClientPermission(NM_CLIENT_PERMISSION_NETWORK_CONTROL);
+    Permission.wifi_protected= checkClientPermission(NM_CLIENT_PERMISSION_WIFI_SHARE_PROTECTED);
+    Permission.wifi_open    = checkClientPermission(NM_CLIENT_PERMISSION_WIFI_SHARE_OPEN);
+    Permission.modify_system= checkClientPermission(NM_CLIENT_PERMISSION_SETTINGS_MODIFY_SYSTEM);
+    Permission.modify_own   = checkClientPermission(NM_CLIENT_PERMISSION_SETTINGS_MODIFY_OWN);
+    Permission.modify_hostname= checkClientPermission(NM_CLIENT_PERMISSION_SETTINGS_MODIFY_HOSTNAME);
+    Permission.modify_dns   = checkClientPermission(NM_CLIENT_PERMISSION_SETTINGS_MODIFY_GLOBAL_DNS);
+    Permission.reload       = checkClientPermission(NM_CLIENT_PERMISSION_RELOAD);
+    Permission.checkpoint   = checkClientPermission(NM_CLIENT_PERMISSION_CHECKPOINT_ROLLBACK);
+    Permission.edstatic     = checkClientPermission(NM_CLIENT_PERMISSION_ENABLE_DISABLE_STATISTICS);
+    Permission.connectivity_check= checkClientPermission(NM_CLIENT_PERMISSION_ENABLE_DISABLE_CONNECTIVITY_CHECK);
     g_main_loop_run(loop);
     g_main_loop_unref(loop);
     g_object_unref(client);
@@ -61,6 +87,11 @@ void runLoop() {
 
 void quitLoop() {
     g_main_loop_quit(loop);
+}
+
+int checkClientPermission(NMClientPermission p) {
+    NMClientPermissionResult r = nm_client_get_permission_result(client, p);
+    return r == NM_CLIENT_PERMISSION_RESULT_YES ? 1 : 0;
 }
 
 void swapConnection(NMConnection *conn, ConnData *data) {
@@ -214,11 +245,6 @@ void wifiScanCallback(GObject* object, GAsyncResult* res, gpointer data) {
 }
 
 int wifiScanAsync() {
-    // libnm 版本需升级
-    if (NM_CLIENT_PERMISSION_RESULT_YES != nm_client_get_permission_result(client, NM_CLIENT_PERMISSION_WIFI_SCAN)) {
-        g_warning("controls whether wifi scans can not be performed \n");
-        return 0; 
-    }
     NMDevice *device = NULL;
     const GPtrArray *devices = nm_client_get_devices(client);
     for (int i = 0; i < devices->len; i++) {
@@ -263,8 +289,8 @@ int notifyDeviceMonitor(const char *iface, char **type, char **bssid, char **con
     *type = g_strdup(getDeviceType(dev));
     *bssid = g_strdup(nm_device_get_hw_address(dev));
     *connId = g_strdup(nm_active_connection_get_id(nm_device_get_active_connection(dev)));
-    g_signal_connect (dev, "notify::" "state", G_CALLBACK(device_state), client);
-    g_signal_connect (dev, "notify::" "active-connection", G_CALLBACK(device_ac), client);
+    g_signal_connect(dev, "notify::" "state", G_CALLBACK(device_state), client);
+    g_signal_connect(dev, "notify::" "active-connection", G_CALLBACK(device_ac), client);
     return 1;
 }
 
