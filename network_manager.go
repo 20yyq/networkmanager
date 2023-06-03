@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-05-24 11:47:01
-// @ LastEditTime : 2023-06-01 15:47:09
+// @ LastEditTime : 2023-06-03 16:11:30
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -23,92 +23,69 @@ import (
 	"time"
 )
 
-const cycle = 60 * 1
-var scanTimestamp int64
-var primaryClient *clients
+var primary *baseClient
 
-type clients struct {
-	primary 	*client
-	rwmutex		sync.RWMutex
+type baseClient struct {
+	conn 		[]*C.ConnData
+	device 		[]*C.DevData
+
+	clientMutex	sync.RWMutex
+	eventMutex 	sync.RWMutex
 	scanMutex 	sync.Mutex
+
+	mapClient 	map[*Client]bool
+	mapEvent 	map[string]bool
+	wifiChan 	map[uint8]chan WifiInfo
+
 	scanList 	[]WifiInfo
 	scanNotify 	chan bool
-	clientMap 	map[*client]bool
-	eventMutex 	sync.RWMutex
-	eventMap 	map[string]*DeviceMonitorEvent
+	idx  		uint8
+	err 		error
 }
 
-func NMStart() error {
-	if 1 != C.int(C.init()) {
-		return nil
+func init() {
+	if err := clientStart(); err != nil {
+		fmt.Println("clientStart error: ", err)
 	}
-	primaryClient = &clients{
-		primary: &client{
-			connList: make([]*Connection, 0),
-			devList: make([]*Device, 0),
-		},
-		clientMap: make(map[*client]bool),
-		eventMap: make(map[string]*DeviceMonitorEvent),
+}
+
+func clientStart() (err error) {
+    var gerr *C.GError
+    if C.Client.client = C.nm_client_new(nil, &gerr); nil == C.Client.client {
+    	err = fmt.Errorf("%s", C.GoString(gerr.message))
+        C.g_error_free(gerr)
+        return
+    }
+    if C.int(C.nm_client_get_nm_running(C.Client.client)) != 1 {
+        C.g_object_unref(C.gpointer(C.Client.client))
+        C.Client.client = nil
+    	return fmt.Errorf("clientStart error")
+    }
+	primary = &baseClient{
+		mapClient: make(map[*Client]bool),
+		mapEvent: make(map[string]bool),
+		wifiChan: make(map[uint8]chan []WifiInfo),
 	}
-	go C.runLoop()
+    C.Client.loop = C.g_main_loop_new(nil, C.gboolean(0))
+	go C.init()
+	return
+}
+
+func ClientQuit() error {
+	C.g_main_loop_quit(C.Client.loop)
 	return nil
 }
 
-func NMQuit() error {
-	C.quitLoop()
-	return nil
-}
-
-//export setConnectionFunc
-func setConnectionFunc(data *C.ConnData) {
-	conn := &Connection{
-		id:		C.GoString(data.id),
-		uuid:	C.GoString(data.uuid),
-		_type:	C.GoString(data._type),
-		dbus_path:		C.GoString(data.dbus_path),
-		firmware:		C.GoString(data.firmware),
-		priority:		int32(data.priority),
-		ipv4_method:	C.GoString(data.ipv4_method),
-		ipv4_dns:		C.GoString(data.ipv4_dns),
-		ipv4_addresses:	C.GoString(data.ipv4_addresses),
-		ipv4_gateway:	C.GoString(data.ipv4_gateway),
+//export initCallBackFunc
+func initCallBackFunc() {
+	primary.conn = make([]*C.ConnData, C.Client.connDataLen)
+	for i := 0; i < int(C.Client.connDataLen); i++ {
+		primary.conn[i] = C.getConnData(C.int(i))
 	}
-	if 1 == C.int(data.autoconnect) {
-		conn.autoconnect = true
+	primary.device = make([]*C.DevData, C.Client.devDataLen)
+	for i := 0; i < int(C.Client.devDataLen); i++ {
+		primary.device[i] = C.getDevData(C.int(i))
 	}
-	primaryClient.primary.connList = append(primaryClient.primary.connList, conn)
-}
-
-//export setDeviceFunc
-func setDeviceFunc(data *C.DevData) {
-	dev := &Device{
-		iface:		C.GoString(data.iface),
-		_type:		C.GoString(data._type),
-		udi:		C.GoString(data.udi),
-		driver:		C.GoString(data.driver),
-		firmware:	C.GoString(data.firmware),
-		hw_address:	C.GoString(data.hw_address),
-		state:		C.GoString(data.state),
-	}
-	if 1 == C.int(data.autoconnect) {
-		dev.autoconnect = true
-	}
-	if 1 == C.int(data.real) {
-		dev.real = true
-	}
-	if 1 == C.int(data.software) {
-		dev.software = true
-	}
-	if uuid := C.GoString(data.uuid); uuid != "" {
-		for i := 0; i < len(primaryClient.primary.connList); i++ {
-			if primaryClient.primary.connList[i].uuid == uuid {
-				dev.conn = primaryClient.primary.connList[i]
-				primaryClient.primary.connList[i].dev = dev
-				break
-			}
-		}
-	}
-	primaryClient.primary.devList = append(primaryClient.primary.devList, dev)
 }
 
 /******************************************** WIFI Start ********************************************/
@@ -125,145 +102,121 @@ type WifiInfo struct {
 	Bitrate 	string	`json:"bitrate"`
 }
 
-func (cls *clients) wifiScan(update bool) []WifiInfo {
+func (cls *baseClient) wifiScan() (<-chan []WifiInfo, error) {
+	if 1 != C.Client.permission.ednwifi && 1 != C.Client.permission.wifi_protected && 1 != C.Client.permission.wifi_open {
+		return nil, fmt.Errorf("permission error")
+	}
 	cls.scanMutex.Lock()
 	defer cls.scanMutex.Unlock()
-	if update || (scanTimestamp + cycle) < time.Now().Unix() {
-		scanTimestamp = time.Now().Unix()
-		if 1 == C.Permission.ednwifi || 1 == C.Permission.wifi_protected || 1 == C.Permission.wifi_open {
-			scanNum := 0
-			cls.scanNotify = make(chan bool)
-			for {
-				if 1 != C.wifiScanAsync() {
-					go func() { cls.scanNotify <- true }()
-				}
-				if is := <-cls.scanNotify; is {
-					fmt.Println("loop")
-					time.Sleep(time.Millisecond * 100)
-					if scanNum++; 3 < scanNum {
-						close(cls.scanNotify)
-						fmt.Println("error")
-						break
-					}
-					continue
-				}
-				fmt.Println("success")
+	if cls.scanNotify != nil {
+		return nil, fmt.Errorf("scan busy")
+	}
+	var wifiChan chan []WifiInfo
+	var scanNum int8
+	cls.scanNotify, wifiChan, cls.idx = make(chan bool), make(chan []WifiInfo), cls.idx + 1
+	if _, ok := cls.wifiChan[cls.idx]; ok {
+		delete(cls.wifiChan, cls.idx)
+	}
+	cls.wifiChan[cls.idx] = wifiChan
+	for {
+		if 1 != C.wifiScanAsync(C.int(cls.idx)) {
+			go func() { cls.scanNotify <- true }()
+		}
+		if is := <-cls.scanNotify; is {
+			fmt.Println("loop")
+			time.Sleep(time.Millisecond * 100)
+			if scanNum++; 3 < scanNum {
+				close(cls.scanNotify)
+				fmt.Println("error")
 				break
 			}
-			cls.scanNotify = nil
+			continue
 		}
+		fmt.Println("success")
+		break
 	}
-	l := make([]WifiInfo, len(cls.scanList))
-	copy(l, cls.scanList)
-	return l
+	cls.scanNotify = nil
+	return wifiChan, nil
 }
 
 //export scanCallBackFunc
-func scanCallBackFunc(name *C.char, n C.guint, wd *C.WifiData) C.int {
-	i := uint(C.uint(n))
-	switch C.GoString(name) {
-	case "start":
-		if 2 > i {
-			i = 0
-			go func() { primaryClient.scanNotify <- true }()
-			break
+func scanCallBackFunc(idx C.int) {
+	if 1 < C.Client.wifiDataLen {
+		close(primary.scanNotify)
+		if wifiChan, ok := primary.wifiChan[uint8(idx)]; ok && wifiChan != nil {
+			list := make([]WifiInfo, 0, C.Client.wifiDataLen)
+			for i := 0; i < int(C.Client.wifiDataLen); i++ {
+				if wd := C.getWifiData(C.int(i)); wd != nil {
+					var info WifiInfo
+					info.idx, info.Ssid =	uint(i), "nil"
+	                if wd.ssid != nil {
+	                    info.Ssid = C.GoString(wd.ssid)
+	                    C.g_free(C.gpointer(wd.ssid))
+	                }
+					info.Bssid 		=	C.GoString(wd.bssid)
+					info.Mode 		=	C.GoString(wd.mode)
+					info.Flags 		=	uint8(C.int(wd.flags))
+					info.Strength 	=	uint8(C.int(wd.strength))
+					info.Freq 		=	strconv.FormatInt(int64(C.uint(wd.freq)), 10) + " MHz"
+					info.Bitrate 	=	strconv.FormatInt(int64(C.uint(wd.bitrate) / 1000), 10) + " Mbit/s"
+					info.dBusPath 	=	C.GoString(wd.dbus_path)
+					list = append(list, info)
+				}
+			}
+			wifiChan <- list
+			close(wifiChan)
 		}
-		primaryClient.scanList = make([]WifiInfo, i)
-		i = 1
-	case "runFunc":
-		primaryClient.scanList[i].idx, primaryClient.scanList[i].Ssid =	i, "nil"
-		if wd.ssid != nil {
-			primaryClient.scanList[i].Ssid=	C.GoString(wd.ssid)
-		}
-		primaryClient.scanList[i].Bssid 	=	C.GoString(wd.bssid)
-		primaryClient.scanList[i].Mode 	=	C.GoString(wd.mode)
-		primaryClient.scanList[i].Flags 	=	uint8(C.int(wd.flags))
-		primaryClient.scanList[i].Strength=	uint8(C.int(wd.strength))
-		primaryClient.scanList[i].Freq 	=	strconv.FormatInt(int64(C.uint(wd.freq)), 10) + " MHz"
-		primaryClient.scanList[i].Bitrate =	strconv.FormatInt(int64(C.uint(wd.bitrate) / 1000), 10) + " Mbit/s"
-		primaryClient.scanList[i].dBusPath=	C.GoString(wd.dbus_path)
-	case "close":
-		close(primaryClient.scanNotify)
-	default:
-
+		return
 	}
-	return C.int(i)
+	go func() { primary.scanNotify <- true }()
 }
 
 /******************************************** WIFI End ********************************************/
 
 /******************************************** Device Start ********************************************/
 
-type devEvent struct {
-	TimeFormat 	string
-	FuncName 	string
-	State 		string
-	Flags 		uint32
-}
-
-type DeviceMonitorEvent struct {
-	dev 	string
-	_type 	string
-	bssid 	string
-	connId 	string
-	echan 	chan devEvent
-}
-
 //export deviceMonitorCallBackFunc
-func deviceMonitorCallBackFunc(funcName *C.char, devName *C.char, state *C.char, n C.guint) {
-	go func(f, d, s string, i uint32) {
-		primaryClient.eventMutex.RLock()
-		val, _ := primaryClient.eventMap[d]
-		primaryClient.eventMutex.RUnlock()
-		if val != nil {
-			val.echan <- devEvent{TimeFormat: time.Now().Format(time.DateTime), FuncName: f, State: s, Flags: i}
+func deviceMonitorCallBackFunc(funcName *C.char, devName *C.char, n C.guint) {
+	f, d, i := C.GoString(funcName), C.GoString(devName), uint32(C.uint(n))
+	primary.clientMutex.RLock()
+	defer primary.clientMutex.RUnlock()
+	for cli, _ := range primary.mapClient {
+		cli.eMutex.RLock()
+		if event, _ := cli.mapDevEvent[d]; event != nil {
+			go func(event *DeviceMonitorEvent, f string, i uint32) {
+				event.echan <- devEvent{TimeFormat: time.Now().Format(time.DateTime), FuncName: f, Flags: i}
+			}(event, f, i)
 		}
-	}(C.GoString(funcName), C.GoString(devName), C.GoString(state), uint32(C.uint(n)))
-}
-
-func (cls *clients) removeDevEvent(devName string) {
-	cls.eventMutex.Lock()
-	val, _ := cls.eventMap[devName]
-	defer cls.eventMutex.Unlock()
-	if nil != val {
-		C.removeDeviceMonitor(C.CString(val.dev))
-		for {
-			if 10 == len(val.echan) {
-				<-val.echan
-				continue
-			}
-			break
-		}
-		close(val.echan)
-		delete(cls.eventMap, val.dev)
+		cli.eMutex.RUnlock()
 	}
 }
 
-func (cls *clients) newDevEvent(devName string) *DeviceMonitorEvent {
+func (cls *baseClient) getDevEventInfo(devName string) (string, string, string) {
 	cls.eventMutex.Lock()
-	val, _ := cls.eventMap[devName]
-	defer cls.eventMutex.Unlock()
-	if nil == val {
+	_, ok := cls.mapEvent[devName]
+	var g_type, g_bssid, g_connId string
+	if !ok {
 		var _type, bssid, connId *C.char
-		if 1 != C.notifyDeviceMonitor(C.CString(devName), &_type, &bssid, &connId) {
-			return nil
+		if 1 == C.notifyDeviceMonitor(C.CString(devName), &_type, &bssid, &connId) {
+			g_type, g_bssid, g_connId = C.GoString(_type), C.GoString(bssid), C.GoString(connId)
+			C.g_free(C.gpointer(_type))
+			C.g_free(C.gpointer(bssid))
+			C.g_free(C.gpointer(connId))
+			cls.mapEvent[devName] = true
 		}
-		val = &DeviceMonitorEvent{dev: devName, echan: make(chan devEvent, 10)}
-		val._type, val.bssid, val.connId = C.GoString(_type), C.GoString(bssid), C.GoString(connId)
-		C.g_free(C.gpointer(_type))
-		C.g_free(C.gpointer(bssid))
-		C.g_free(C.gpointer(connId))
-		cls.eventMap[devName] = val
 	}
-	return val
-}
-
-func (dme *DeviceMonitorEvent) Event() string {
-	if de, ok := <-dme.echan; ok {
-		return fmt.Sprintf("%s %s", de.TimeFormat, de.State)
+	cls.eventMutex.Unlock()
+	if g_bssid == "" {
+		cls.clientMutex.RLock()
+		defer cls.clientMutex.RUnlock()
+		for val, _ := range cls.mapClient {
+			if de, _ := val.mapDevEvent[devName]; de != nil {
+				g_type, g_bssid, g_connId = de._type, de.bssid, de.connId
+				break
+			}
+		}
 	}
-	return fmt.Sprintf("%s Event close", time.Now().Format(time.DateTime))
+	return g_type, g_bssid, g_connId
 }
-
 
 /******************************************** Device End ********************************************/

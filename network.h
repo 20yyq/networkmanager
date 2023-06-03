@@ -7,13 +7,13 @@ typedef struct {
     guint32     freq;
     guint32     bitrate;
     guint8      strength;
-    char *ssid;
-    const char *bssid;
-    const char *mode;
-    const char *dbus_path;
+    char        *ssid;
+    const char  *bssid;
+    const char  *mode;
+    const char  *dbus_path;
 } WifiData;
 
-typedef struct {
+struct tag_ConnData {
     const char  *id;
     const char  *uuid;
     const char  *_type;
@@ -25,9 +25,10 @@ typedef struct {
     const char  *ipv4_dns;
     const char  *ipv4_addresses;
     const char  *ipv4_gateway;
-} ConnData;
+    struct tag_DevData     *dev;
+};
 
-typedef struct {
+struct tag_DevData {
     const char  *iface;
     const char  *_type;
     const char  *udi;
@@ -35,11 +36,14 @@ typedef struct {
     const char  *firmware;
     const char  *hw_address;
     const char  *state;
-    const char  *uuid;
     gboolean    autoconnect;
     gboolean    real;
     gboolean    software;
-} DevData;
+    struct tag_ConnData     *conn;
+};
+
+typedef struct tag_ConnData ConnData;
+typedef struct tag_DevData DevData;
 
 typedef struct {
     int    ednetwork;
@@ -59,14 +63,27 @@ typedef struct {
     int    edstatic;
     int    connectivity_check;
 } PermissionData;
-extern PermissionData Permission;
 
-gboolean init();
-void runLoop();
-void quitLoop();
+typedef struct {
+    GMainLoop       *loop;
+    NMClient        *client;
+    uint            wifiDataLen;
+    WifiData        *wifiData;
+    uint            connDataLen;
+    ConnData        *connData;
+    uint            devDataLen;
+    DevData         *devData;
+    PermissionData  permission;
+} clientData;
+extern clientData Client;
+
+void init();
+WifiData *getWifiData(int i);
+ConnData *getConnData(int i);
+DevData *getDevData(int i);
 
 // WIIF func
-int wifiScanAsync();
+int wifiScanAsync(int idx);
 
 // Devices func
 int notifyDeviceMonitor(const char *iface, char **type, char **bssid, char **connId);
