@@ -1,7 +1,7 @@
 /**
  * @Author: Eacher
  * @Date:   2023-05-22 10:42:36
- * @LastEditTime:   2023-06-03 16:04:47
+ * @LastEditTime:   2023-06-05 08:10:15
  * @LastEditors:    Eacher
  * --------------------------------------------------------------------------------------------------------------------<
  * @Description:  gcc 编译动态库： gcc -shared -fPIC -o libgonmcli.so network.c `pkg-config --cflags --libs libnm`
@@ -47,7 +47,7 @@ DevData *getDevData(int i) {
 extern void initCallBackFunc();
 const char *getDeviceType(NMDevice *device);
 const char *getDeviceState(NMDevice *device);
-int checkClientPermission(NMClientPermission p);
+const char *checkClientPermission(NMClientPermission p);
 void swapConnection(NMConnection *conn, ConnData *data);
 void swapDevice(NMDevice *device, DevData *data);
 void init() {
@@ -228,9 +228,17 @@ const char *getDeviceState(NMDevice *device) {
     return state;
 }
 
-int checkClientPermission(NMClientPermission p) {
-    NMClientPermissionResult r = nm_client_get_permission_result(Client.client, p);
-    return r == NM_CLIENT_PERMISSION_RESULT_YES ? 1 : 0;
+const char *checkClientPermission(NMClientPermission p) {
+    const char  *per = "auth";
+    switch (nm_client_get_permission_result(Client.client, p)) {
+    case NM_CLIENT_PERMISSION_RESULT_YES:
+        per = "yes";
+        break;
+    case NM_CLIENT_PERMISSION_RESULT_NO:
+        per = "no";
+        break;
+    }
+    return per;
 }
 
 /*************************************************************** WIFI Start *********************************************************************/

@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-05-31 08:00:36
-// @ LastEditTime : 2023-06-03 16:07:40
+// @ LastEditTime : 2023-06-05 08:30:12
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -41,6 +41,10 @@ func NewClient() (*Client, error) {
 	}
 	primary.mapClient[c] = true
 	return c, nil
+}
+
+func (c *Client) GetPermissions() map[string]string {
+	return c.permissions()
 }
 
 func (c *Client) WifiScan(update bool) []WifiInfo {

@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-05-24 11:47:01
-// @ LastEditTime : 2023-06-03 16:11:30
+// @ LastEditTime : 2023-06-05 08:33:12
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -30,29 +30,45 @@ type baseClient struct {
 	device 		[]*C.DevData
 
 	clientMutex	sync.RWMutex
-	eventMutex 	sync.RWMutex
-	scanMutex 	sync.Mutex
 
 	mapClient 	map[*Client]bool
-	mapEvent 	map[string]bool
-	wifiChan 	map[uint8]chan WifiInfo
+	wifiIdx  	uint8
+	wifiChan 	map[uint8]chan []WifiInfo
 
-	scanList 	[]WifiInfo
-	scanNotify 	chan bool
-	idx  		uint8
 	err 		error
+}
+
+func (cls *baseClient) permissions() map[string]string {
+	m := make(map[string]string)
+	m[`org.freedesktop.NetworkManager.enable-disable-network`]			= C.GoString(C.Client.permission.ednetwork)
+	m[`org.freedesktop.NetworkManager.enable-disable-wifi`]				= C.GoString(C.Client.permission.ednwifi)
+	m[`org.freedesktop.NetworkManager.enable-disable-wwan`]				= C.GoString(C.Client.permission.edwwan)
+	m[`org.freedesktop.NetworkManager.enable-disable-wimax`]			= C.GoString(C.Client.permission.edwimax)
+	m[`org.freedesktop.NetworkManager.sleep-wake`]						= C.GoString(C.Client.permission.sleep_wake)
+	m[`org.freedesktop.NetworkManager.network-control`]					= C.GoString(C.Client.permission.network_control)
+	m[`org.freedesktop.NetworkManager.wifi.share.protected`]			= C.GoString(C.Client.permission.wifi_protected)
+	m[`org.freedesktop.NetworkManager.wifi.share.open`]					= C.GoString(C.Client.permission.wifi_open)
+	m[`org.freedesktop.NetworkManager.settings.modify.system`]			= C.GoString(C.Client.permission.modify_system)
+	m[`org.freedesktop.NetworkManager.settings.modify.own`]				= C.GoString(C.Client.permission.modify_own)
+	m[`org.freedesktop.NetworkManager.settings.modify.hostname`]		= C.GoString(C.Client.permission.modify_hostname)
+	m[`org.freedesktop.NetworkManager.settings.modify.global-dns`]		= C.GoString(C.Client.permission.modify_dns)
+	m[`org.freedesktop.NetworkManager.reload`]							= C.GoString(C.Client.permission.reload)
+	m[`org.freedesktop.NetworkManager.checkpoint-rollback`]				= C.GoString(C.Client.permission.checkpoint)
+	m[`org.freedesktop.NetworkManager.enable-disable-statistics`]			= C.GoString(C.Client.permission.edstatic)
+	m[`org.freedesktop.NetworkManager.enable-disable-connectivity-check`]	= C.GoString(C.Client.permission.connectivity_check)
+	return m
 }
 
 func init() {
 	if err := clientStart(); err != nil {
-		fmt.Println("clientStart error: ", err)
+		fmt.Println(err)
 	}
 }
 
 func clientStart() (err error) {
     var gerr *C.GError
     if C.Client.client = C.nm_client_new(nil, &gerr); nil == C.Client.client {
-    	err = fmt.Errorf("%s", C.GoString(gerr.message))
+    	err = fmt.Errorf("C client Start error: %s", C.GoString(gerr.message))
         C.g_error_free(gerr)
         return
     }
@@ -63,7 +79,6 @@ func clientStart() (err error) {
     }
 	primary = &baseClient{
 		mapClient: make(map[*Client]bool),
-		mapEvent: make(map[string]bool),
 		wifiChan: make(map[uint8]chan []WifiInfo),
 	}
     C.Client.loop = C.g_main_loop_new(nil, C.gboolean(0))
@@ -102,31 +117,36 @@ type WifiInfo struct {
 	Bitrate 	string	`json:"bitrate"`
 }
 
+var scanMutex sync.Mutex
+var scanNotify chan bool = nil
+
 func (cls *baseClient) wifiScan() (<-chan []WifiInfo, error) {
-	if 1 != C.Client.permission.ednwifi && 1 != C.Client.permission.wifi_protected && 1 != C.Client.permission.wifi_open {
+	if "yes" != C.GoString(C.Client.permission.ednwifi) && "yes" != C.GoString(C.Client.permission.wifi_protected) && "yes" != C.GoString(C.Client.permission.wifi_open) {
 		return nil, fmt.Errorf("permission error")
 	}
-	cls.scanMutex.Lock()
-	defer cls.scanMutex.Unlock()
-	if cls.scanNotify != nil {
+	scanMutex.Lock()
+	defer scanMutex.Unlock()
+	if scanNotify != nil {
 		return nil, fmt.Errorf("scan busy")
 	}
 	var wifiChan chan []WifiInfo
 	var scanNum int8
-	cls.scanNotify, wifiChan, cls.idx = make(chan bool), make(chan []WifiInfo), cls.idx + 1
-	if _, ok := cls.wifiChan[cls.idx]; ok {
-		delete(cls.wifiChan, cls.idx)
+	scanNotify, wifiChan, cls.wifiIdx = make(chan bool), make(chan []WifiInfo), cls.wifiIdx + 1
+	if _, ok := cls.wifiChan[cls.wifiIdx]; ok {
+		delete(cls.wifiChan, cls.wifiIdx)
 	}
-	cls.wifiChan[cls.idx] = wifiChan
+	cls.wifiChan[cls.wifiIdx] = wifiChan
 	for {
-		if 1 != C.wifiScanAsync(C.int(cls.idx)) {
-			go func() { cls.scanNotify <- true }()
+		if 1 != C.wifiScanAsync(C.int(cls.wifiIdx)) {
+			go func() { scanNotify <- true }()
 		}
-		if is := <-cls.scanNotify; is {
+		if is := <-scanNotify; is {
 			fmt.Println("loop")
 			time.Sleep(time.Millisecond * 100)
 			if scanNum++; 3 < scanNum {
-				close(cls.scanNotify)
+				close(wifiChan)
+				close(scanNotify)
+				delete(cls.wifiChan, cls.wifiIdx)
 				fmt.Println("error")
 				break
 			}
@@ -135,40 +155,40 @@ func (cls *baseClient) wifiScan() (<-chan []WifiInfo, error) {
 		fmt.Println("success")
 		break
 	}
-	cls.scanNotify = nil
+	scanNotify = nil
 	return wifiChan, nil
 }
 
 //export scanCallBackFunc
 func scanCallBackFunc(idx C.int) {
-	if 1 < C.Client.wifiDataLen {
-		close(primary.scanNotify)
-		if wifiChan, ok := primary.wifiChan[uint8(idx)]; ok && wifiChan != nil {
-			list := make([]WifiInfo, 0, C.Client.wifiDataLen)
-			for i := 0; i < int(C.Client.wifiDataLen); i++ {
-				if wd := C.getWifiData(C.int(i)); wd != nil {
-					var info WifiInfo
-					info.idx, info.Ssid =	uint(i), "nil"
-	                if wd.ssid != nil {
-	                    info.Ssid = C.GoString(wd.ssid)
-	                    C.g_free(C.gpointer(wd.ssid))
-	                }
-					info.Bssid 		=	C.GoString(wd.bssid)
-					info.Mode 		=	C.GoString(wd.mode)
-					info.Flags 		=	uint8(C.int(wd.flags))
-					info.Strength 	=	uint8(C.int(wd.strength))
-					info.Freq 		=	strconv.FormatInt(int64(C.uint(wd.freq)), 10) + " MHz"
-					info.Bitrate 	=	strconv.FormatInt(int64(C.uint(wd.bitrate) / 1000), 10) + " Mbit/s"
-					info.dBusPath 	=	C.GoString(wd.dbus_path)
-					list = append(list, info)
-				}
-			}
-			wifiChan <- list
-			close(wifiChan)
-		}
+	if 2 > C.Client.wifiDataLen {
+		go func() { scanNotify <- true }()
 		return
 	}
-	go func() { primary.scanNotify <- true }()
+	close(scanNotify)
+	if wifiChan, ok := primary.wifiChan[uint8(idx)]; ok && wifiChan != nil {
+		list := make([]WifiInfo, 0, C.Client.wifiDataLen)
+		for i := 0; i < int(C.Client.wifiDataLen); i++ {
+			if wd := C.getWifiData(C.int(i)); wd != nil {
+				var info WifiInfo
+				info.idx, info.Ssid =	uint(i), "nil"
+                if wd.ssid != nil {
+                    info.Ssid = C.GoString(wd.ssid)
+                    C.g_free(C.gpointer(wd.ssid))
+                }
+				info.Bssid 		=	C.GoString(wd.bssid)
+				info.Mode 		=	C.GoString(wd.mode)
+				info.Flags 		=	uint8(C.int(wd.flags))
+				info.Strength 	=	uint8(C.int(wd.strength))
+				info.Freq 		=	strconv.FormatInt(int64(C.uint(wd.freq)), 10) + " MHz"
+				info.Bitrate 	=	strconv.FormatInt(int64(C.uint(wd.bitrate) / 1000), 10) + " Mbit/s"
+				info.dBusPath 	=	C.GoString(wd.dbus_path)
+				list = append(list, info)
+			}
+		}
+		wifiChan <- list
+		close(wifiChan)
+	}
 }
 
 /******************************************** WIFI End ********************************************/
@@ -191,21 +211,22 @@ func deviceMonitorCallBackFunc(funcName *C.char, devName *C.char, n C.guint) {
 	}
 }
 
-func (cls *baseClient) getDevEventInfo(devName string) (string, string, string) {
-	cls.eventMutex.Lock()
-	_, ok := cls.mapEvent[devName]
-	var g_type, g_bssid, g_connId string
-	if !ok {
+var eventMutex sync.Mutex
+var eventMaps = map[string]bool{}
+
+func (cls *baseClient) getDevEventInfo(devName string) (g_type, g_bssid, g_connId string) {
+	eventMutex.Lock()
+	if _, ok := eventMaps[devName]; !ok {
 		var _type, bssid, connId *C.char
 		if 1 == C.notifyDeviceMonitor(C.CString(devName), &_type, &bssid, &connId) {
 			g_type, g_bssid, g_connId = C.GoString(_type), C.GoString(bssid), C.GoString(connId)
 			C.g_free(C.gpointer(_type))
 			C.g_free(C.gpointer(bssid))
 			C.g_free(C.gpointer(connId))
-			cls.mapEvent[devName] = true
+			eventMaps[devName] = true
 		}
 	}
-	cls.eventMutex.Unlock()
+	eventMutex.Unlock()
 	if g_bssid == "" {
 		cls.clientMutex.RLock()
 		defer cls.clientMutex.RUnlock()

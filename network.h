@@ -46,22 +46,22 @@ typedef struct tag_ConnData ConnData;
 typedef struct tag_DevData DevData;
 
 typedef struct {
-    int    ednetwork;
-    int    ednwifi;
-    int    edwwan;
-    int    edwimax;
-    int    sleep_wake;
-    int    network_control;
-    int    wifi_protected;
-    int    wifi_open;
-    int    modify_system;
-    int    modify_own;
-    int    modify_hostname;
-    int    modify_dns;
-    int    reload;
-    int    checkpoint;
-    int    edstatic;
-    int    connectivity_check;
+    const char  *ednetwork;
+    const char  *ednwifi;
+    const char  *edwwan;
+    const char  *edwimax;
+    const char  *sleep_wake;
+    const char  *network_control;
+    const char  *wifi_protected;
+    const char  *wifi_open;
+    const char  *modify_system;
+    const char  *modify_own;
+    const char  *modify_hostname;
+    const char  *modify_dns;
+    const char  *reload;
+    const char  *checkpoint;
+    const char  *edstatic;
+    const char  *connectivity_check;
 } PermissionData;
 
 typedef struct {
