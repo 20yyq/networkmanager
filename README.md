@@ -1,28 +1,27 @@
-# Gonmcli
-gonmcli
+# networkmanager
+
 ## 简介
-	这是一个基于 NetworkManager 、 libnm 开发的 GoLang 网络管理客户端，实现WIFI管理和网卡设备监听等功能。
+	这是一个基于 netlink 开发的 GoLang 以太网管理包。
 	
 # 例子
 ```go
 
 func main() {
-	w, err := inotify.NewWatcher()
-	if err != nil {
-		fmt.Println("NewWatcher err", err)
-		return
-	}
-	w.AddWatch("/temp", syscall.IN_OPEN|syscall.IN_CLOSE|syscall.IN_DELETE|syscall.IN_DELETE_SELF|syscall.IN_CREATE|syscall.IN_IGNORED|syscall.IN_MODIFY|syscall.IN_MOVE|syscall.IN_MOVE_SELF|syscall.IN_MOVED_FROM|syscall.IN_MOVED_TO|syscall.IN_MOVE_SELF|syscall.IN_ATTRIB)
-	fmt.Println("start")
-	for {
-		ws, err := w.WaitEvent()
-		if err != nil {
-			fmt.Println("WaitEvent Error", err)
-			time.Sleep(time.Millisecond*300)
-			continue
-		}
-		fmt.Println("WaitEvent:", ws.Mask, ws.FileName, ws.GetEventName())
-	}
+	object, _ := InterfaceByName("eth0")
+	fmt.Println("object.list", object.list, object.sock.Pid)
+	// fmt.Println("num1", object.Up())
+	// time.Sleep(time.Second*5)
+	// fmt.Println("RemoveIP", object.RemoveIP(Addrs{Local: net.IPv4(192, 168, 1, 111).To4()}))
+	// fmt.Println("AddIP", object.AddIP(Addrs{Local: net.IPv4(192, 168, 1, 111).To4()}))
+	// fmt.Println("ReplaceIP", object.ReplaceIP(Addrs{Local: net.IPv4(192, 168, 1, 110).To4()}))
+	// fmt.Println("num2", object.Down())
+	l, err := object.IPList()
+	fmt.Println("IPList ", l, err, object.iface.Name)
+	time.Sleep(time.Second*5)
+	object.Close()
+	fmt.Println("object.list", object.list)
+	<-object.closes
+	// time.Sleep(time.Second*5)
 	fmt.Println("end")
 }
 

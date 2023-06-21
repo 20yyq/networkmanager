@@ -1,3 +1,3 @@
-module github.com/20yyq/gonmcli
+module github.com/20yyq/networkmanager
 
 go 1.20
