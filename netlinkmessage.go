@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-26 08:01:05
-// @ LastEditTime : 2023-06-27 09:34:00
+// @ LastEditTime : 2023-06-28 14:40:59
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -91,8 +91,11 @@ func (nlm *NetlinkMessage) deserializeIfAddrmsgMessages(ifi *net.Interface) ([]*
 func (nlm *NetlinkMessage) deserializeRtMsgMessages(ifi *net.Interface) ([]*Routes, error) {
 	var res []*Routes
 	for _, m := range nlm.Message {
-		if l, err := syscall.ParseNetlinkRouteAttr(m); err != nil {
-			single := Routes{oifIdx: -9999, iifIdx: -9999}
+		if l, err := syscall.ParseNetlinkRouteAttr(m); err == nil {
+			single := Routes{
+				RtMsg: (*syscall.RtMsg)(unsafe.Pointer(&m.Data[:syscall.SizeofRtMsg][0])),
+				oifIdx: -9999, iifIdx: -9999,
+			}
 			for _, v := range l {
 				switch v.Attr.Type {
 				case syscall.RTA_DST: // 目标地址
@@ -114,7 +117,7 @@ func (nlm *NetlinkMessage) deserializeRtMsgMessages(ifi *net.Interface) ([]*Rout
 				case syscall.RTA_FLOW: // 所属领域
 
 				case syscall.RTA_TABLE:
-					single.Table = binary.LittleEndian.Uint32(v.Value)
+					
 				case syscall.RTA_CACHEINFO:
 					fmt.Println("syscall.RTA_CACHEINFO", v.Value)
 				case syscall.RTNLGRP_ND_USEROPT:

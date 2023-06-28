@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-21 08:16:59
-// @ LastEditTime : 2023-06-27 09:54:38
+// @ LastEditTime : 2023-06-28 15:29:10
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -108,6 +108,7 @@ func (ifi *Interface) Close() {
 		return
 	}
 	ifi.fd = -1
+	<-ifi.closes
 }
 
 func (ifi *Interface) receive() {
@@ -237,5 +238,16 @@ func RtAttrToSliceByte(types uint16, ip net.IP, ips ...net.IP) []byte {
 	copy(data[next:], ip)
 	next += len(ip)
 	copy(data[next:], children)
+	return data
+}
+
+func appendSliceByte(data []byte, types uint16, ips ...net.IP) []byte {
+	tmp := data
+	if 0 < len(ips) {
+		res := RtAttrToSliceByte(types, ips[0], ips[1:]...)
+		data = make([]byte, len(tmp) + len(res))
+		copy(data[:len(tmp)], tmp)
+		copy(data[len(tmp):], res)
+	}
 	return data
 }

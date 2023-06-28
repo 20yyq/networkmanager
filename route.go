@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-27 09:38:13
-// @ LastEditTime : 2023-06-27 11:58:23
+// @ LastEditTime : 2023-06-28 15:26:34
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -18,10 +18,9 @@ import (
 )
 
 type Routes struct {
+	*syscall.RtMsg
 	iifIdx 		int
 	oifIdx 		int
-	Scope 		uint8
-	Table 		uint32
 	Priority 	uint32
 	Dst 		net.IP
 	Src 		net.IP
@@ -89,10 +88,9 @@ func (ifi *Interface) RemoveRoute(r Routes) error {
 	return err
 }
 
-// TODO 暂时不可用
 func (ifi *Interface) ReplaceRoute(r *Routes) error {
 	data := SerializeRoutes(r, uint32(ifi.iface.Index))
-	nl, err := ifi.request(syscall.RTM_NEWROUTE, syscall.NLM_F_REQUEST|syscall.NLM_F_REPLACE|syscall.NLM_F_ACK, data)
+	nl, err := ifi.request(syscall.RTM_NEWROUTE, syscall.NLM_F_REQUEST|syscall.NLM_F_ACK|syscall.NLM_F_REPLACE, data)
 	if err == nil {
 		nl.mutex.Lock()
 		if nl.wait {
@@ -107,66 +105,45 @@ func (ifi *Interface) ReplaceRoute(r *Routes) error {
 }
 
 func SerializeRoutes(r *Routes, idx uint32) []byte {
-	dstlen, srclen := uint8(len(r.Dst)), uint8(len(r.Src))
-	if dstlen != srclen {
-		return nil
-	}
 	var (
-		protocol uint8 	= syscall.RTPROT_BOOT
-		family uint8 	= syscall.AF_INET
-		table uint8 	= syscall.RT_TABLE_MAIN
-		tos uint8 		= 0
-		types uint8 	= syscall.RTN_UNICAST
+		family uint8 = syscall.AF_INET
 		flags uint32
+		dstlen, srclen int
+		data []byte
 	)
-	tmp := make([]byte, syscall.SizeofRtMsg)
-	res := RtAttrToSliceByte(syscall.RTA_OIF, binary.LittleEndian.AppendUint32(nil, idx))
-	data := make([]byte, len(tmp) + len(res))
-	copy(data[:len(tmp)], tmp)
-	copy(data[len(tmp):], res)
-	tmp = data
+	data = make([]byte, syscall.SizeofRtMsg)
+	data = appendSliceByte(data, syscall.RTA_OIF, binary.LittleEndian.AppendUint32(nil, idx))
 	if r.Priority > 0 {
-		res = RtAttrToSliceByte(syscall.RTA_PRIORITY, binary.LittleEndian.AppendUint32(nil, r.Priority))
-		data = make([]byte, len(tmp) + len(res))
-		copy(data[:len(tmp)], tmp)
-		copy(data[len(tmp):], res)
-		tmp = data
-	}
-	table = uint8(r.Table)
-	if r.Table > 254 {
-		res = RtAttrToSliceByte(syscall.RTA_TABLE, binary.LittleEndian.AppendUint32(nil, r.Table))
-		data = make([]byte, len(tmp) + len(res))
-		copy(data[:len(tmp)], tmp)
-		copy(data[len(tmp):], res)
-		tmp, table = data, syscall.RT_TABLE_UNSPEC
+		data = appendSliceByte(data, syscall.RTA_PRIORITY, binary.LittleEndian.AppendUint32(nil, r.Priority))
 	}
 	if r.Gw != nil {
-		res = RtAttrToSliceByte(syscall.RTA_GATEWAY, r.Gw)
-		data = make([]byte, len(tmp) + len(res))
-		copy(data[:len(tmp)], tmp)
-		copy(data[len(tmp):], res)
-		tmp = data
-		if len(r.Gw) == net.IPv6len {
+		b := r.Gw.To4()
+		if len(b) == 0 {
+			b = r.Gw.To16()
 			family = syscall.AF_INET6
 		}
-		res = RtMsgToSliceByte(family, dstlen, srclen, tos, table, protocol, r.Scope, types, flags)
-		copy(data[:syscall.SizeofRtMsg], res)
-		return data
+		data = appendSliceByte(data, syscall.RTA_GATEWAY, b)
+	} else {
+		if r.Dst != nil {
+			b := r.Dst.To4()
+			if len(b) == 0 {
+				b = r.Dst.To16()
+				family = syscall.AF_INET6
+			}
+			data = appendSliceByte(data, syscall.RTA_DST, b)
+			dstlen, _ = r.Dst.DefaultMask().Size()
+		}
+		if r.Src != nil {
+			b := r.Src.To4()
+			if len(b) == 0 {
+				b = r.Src.To16()
+				family = syscall.AF_INET6
+			}
+			data = appendSliceByte(data, syscall.RTA_PREFSRC, b)
+			srclen, _ = r.Src.DefaultMask().Size()
+		}
 	}
-	res = RtAttrToSliceByte(syscall.RTA_DST, r.Dst)
-	data = make([]byte, len(tmp) + len(res))
-	copy(data[:len(tmp)], tmp)
-	copy(data[len(tmp):], res)
-	tmp = data
-	res = RtAttrToSliceByte(syscall.RTA_SRC, r.Src)
-	data = make([]byte, len(tmp) + len(res))
-	copy(data[:len(tmp)], tmp)
-	copy(data[len(tmp):], res)
-	tmp = data
-	if len(r.Dst) == net.IPv6len {
-		family = syscall.AF_INET6
-	}
-	res = RtMsgToSliceByte(family, dstlen, srclen, tos, table, protocol, r.Scope, types, flags)
+	res := RtMsgToSliceByte(family, uint8(dstlen), uint8(srclen), r.RtMsg.Tos, r.RtMsg.Table, r.RtMsg.Protocol, r.RtMsg.Scope, r.RtMsg.Type, flags)
 	copy(data[:syscall.SizeofRtMsg], res)
 	return data
 }

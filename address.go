@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-27 09:39:36
-// @ LastEditTime : 2023-06-27 11:58:28
+// @ LastEditTime : 2023-06-27 13:46:29
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -116,25 +116,14 @@ func SerializeAddrs(a *Addrs, idx uint32) []byte {
 	}
 	mask := a.Local.DefaultMask()
 	prefixlen, masklen := mask.Size()
-	res := IfAddrmsgToSliceByte(uint8(family), uint8(prefixlen), a.flags, a.scope, idx)
+	data := IfAddrmsgToSliceByte(uint8(family), uint8(prefixlen), a.flags, a.scope, idx)
 	localAddr := a.Local.To4()
 	if family == syscall.AF_INET6 {
 		localAddr = a.Local.To16()
 	}
-	data := make([]byte, len(res))
-	copy(data, res)
-	tmp := data
-	res = RtAttrToSliceByte(syscall.IFA_LOCAL, localAddr)
-	data = make([]byte, len(tmp) + len(res))
-	copy(data[:len(tmp)], tmp)
-	copy(data[len(tmp):], res)
-	tmp = data
+	data = appendSliceByte(data, syscall.IFA_LOCAL, localAddr)
 	if a.Netmask != nil {
-		res = RtAttrToSliceByte(syscall.IFA_ADDRESS, a.Netmask)
-		data = make([]byte, len(tmp) + len(res))
-		copy(data[:len(tmp)], tmp)
-		copy(data[len(tmp):], res)
-		tmp = data
+		data = appendSliceByte(data, syscall.IFA_ADDRESS, a.Netmask)
 	}
 	if a.Broadcast == nil && prefixlen < 31 {
 		broadcast := make(net.IP, masklen/8)
@@ -144,26 +133,13 @@ func SerializeAddrs(a *Addrs, idx uint32) []byte {
 		a.Broadcast = broadcast
 	}
 	if a.Broadcast != nil {
-		res = RtAttrToSliceByte(syscall.IFA_BROADCAST, a.Broadcast)
-		data = make([]byte, len(tmp) + len(res))
-		copy(data[:len(tmp)], tmp)
-		copy(data[len(tmp):], res)
-		tmp = data
+		data = appendSliceByte(data, syscall.IFA_BROADCAST, a.Broadcast)
 	}
 	if a.label != "" {
-		res = RtAttrToSliceByte(syscall.IFA_LABEL, []byte(a.label))
-		data = make([]byte, len(tmp) + len(res))
-		copy(data[:len(tmp)], tmp)
-		copy(data[len(tmp):], res)
-		tmp = data
+		data = appendSliceByte(data, syscall.IFA_LABEL, []byte(a.label))
 	}
 	if a.Cache != nil && (a.Cache.PreferredLft > 0 || a.Cache.ValidLft > 0) {
-		tmpByte := (*(*[16]byte)(unsafe.Pointer(a.Cache)))[:]
-		res = RtAttrToSliceByte(syscall.IFA_CACHEINFO, tmpByte)
-		data = make([]byte, len(tmp) + len(res))
-		copy(data[:len(tmp)], tmp)
-		copy(data[len(tmp):], res)
-		tmp = data
+		data = appendSliceByte(data, syscall.IFA_CACHEINFO, (*(*[16]byte)(unsafe.Pointer(a.Cache)))[:])
 	}
 	return data
 }
