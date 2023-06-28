@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-27 09:39:36
-// @ LastEditTime : 2023-06-28 16:53:34
+// @ LastEditTime : 2023-06-28 17:02:08
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -112,29 +112,27 @@ func (ifi *Interface) ReplaceIP(a *Addrs) error {
 
 func SerializeAddrs(a *Addrs, idx uint32) []byte {
 	family := syscall.AF_INET
-	if len(a.Local) == net.IPv6len {
+	localAddr := a.Local.To4()
+	if len(localAddr) == 0 {
 		family = syscall.AF_INET6
+		localAddr = a.Local.To16()
 	}
 	mask := a.Local.DefaultMask()
 	prefixlen, masklen := mask.Size()
 	data := IfAddrmsgToSliceByte(uint8(family), uint8(prefixlen), a.flags, a.scope, idx)
-	localAddr := a.Local.To4()
-	if family == syscall.AF_INET6 {
-		localAddr = a.Local.To16()
-	}
 	data = appendSliceByte(data, syscall.IFA_LOCAL, localAddr)
-	if a.Netmask != nil {
-		data = appendSliceByte(data, syscall.IFA_ADDRESS, a.Netmask)
-	}
 	if a.Broadcast == nil && prefixlen < 31 {
-		broadcast := make(net.IP, masklen/8)
+		broadcast := make([]byte, masklen/8)
 		for i := range localAddr {
 			broadcast[i] = localAddr[i] | ^mask[i]
 		}
-		a.Broadcast = broadcast
+		a.Broadcast = net.IPv4(broadcast[0], broadcast[1], broadcast[2], broadcast[3])
 	}
 	if a.Broadcast != nil {
-		data = appendSliceByte(data, syscall.IFA_BROADCAST, a.Broadcast)
+		data = appendSliceByte(data, syscall.IFA_BROADCAST, a.Broadcast.To4())
+	}
+	if a.Anycast != nil {
+		data = appendSliceByte(data, syscall.IFA_ANYCAST, a.Anycast.To4())
 	}
 	if a.label != "" {
 		data = appendSliceByte(data, syscall.IFA_LABEL, []byte(a.label))
