@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-27 09:39:36
-// @ LastEditTime : 2023-06-27 13:46:29
+// @ LastEditTime : 2023-06-28 16:53:34
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -21,10 +21,10 @@ type Addrs struct {
 	label 		string
 	scope 		uint8
 	flags 		uint8
+	netmask 	net.IP
 	Local 		net.IP
 	Broadcast 	net.IP
 	Anycast 	net.IP
-	Netmask 	net.IP
 
 	Cache 		*cacheInfo
 }
@@ -89,13 +89,14 @@ func (ifi *Interface) RemoveIP(a Addrs) error {
 	return err
 }
 
-// TODO 暂时不可用
 func (ifi *Interface) ReplaceIP(a *Addrs) error {
-	if a.Cache == nil {
-		return fmt.Errorf("34")
+	if a.netmask != nil {
+		if err := ifi.ReplaceIP(&Addrs{Local: a.netmask, Cache: &CacheInfo{PreferredLft: 1, ValidLft: 1}}); err != nil {
+			return err
+		}
 	}
 	data := SerializeAddrs(a, uint32(ifi.iface.Index))
-	nl, err := ifi.request(syscall.RTM_NEWADDR, syscall.NLM_F_REQUEST|syscall.NLM_F_REPLACE|syscall.NLM_F_ACK, data)
+	nl, err := ifi.request(syscall.RTM_NEWADDR, syscall.NLM_F_REQUEST|syscall.NLM_F_ACK|syscall.NLM_F_REPLACE, data)
 	if err == nil {
 		nl.mutex.Lock()
 		if nl.wait {

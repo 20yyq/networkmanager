@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-26 08:01:05
-// @ LastEditTime : 2023-06-28 14:40:59
+// @ LastEditTime : 2023-06-28 16:53:03
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -61,13 +61,13 @@ func (nlm *NetlinkMessage) deserializeIfAddrmsgMessages(ifi *net.Interface) ([]*
 			for _, v := range l {
 				switch v.Attr.Type {
 				case syscall.IFA_ADDRESS:
-					single.Netmask = net.IP(v.Value)
+					single.netmask = net.IPv4(v.Value[0], v.Value[1], v.Value[2], v.Value[3])
 				case syscall.IFA_LOCAL:
-					single.Local = net.IP(v.Value)
+					single.Local = net.IPv4(v.Value[0], v.Value[1], v.Value[2], v.Value[3])
 				case syscall.IFA_BROADCAST:
-					single.Broadcast = net.IP(v.Value)
+					single.Broadcast = net.IPv4(v.Value[0], v.Value[1], v.Value[2], v.Value[3])
 				case syscall.IFA_ANYCAST:
-					single.Anycast = net.IP(v.Value)
+					single.Anycast = net.IPv4(v.Value[0], v.Value[1], v.Value[2], v.Value[3])
 				case syscall.IFA_LABEL:
 					single.label = string(v.Value)
 				case syscall.IFA_CACHEINFO:

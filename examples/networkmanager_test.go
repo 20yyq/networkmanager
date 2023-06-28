@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-02-20 08:50:39
-// @ LastEditTime : 2023-06-28 15:29:47
+// @ LastEditTime : 2023-06-28 15:40:38
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Linux networkmanager 使用例子
@@ -31,7 +31,7 @@ func TestLinux(t *testing.T) {
 		Gateway string `json:"gateway"`
 	}{}
 	var object *networkmanager.Interface
-	if err := json.Unmarshal(b, config); err == nil {
+	if err := json.Unmarshal([]byte(josnStr), config); err == nil {
 		if object, err = networkmanager.InterfaceByName(config.Iface); err != nil {
 			t.Log("InterfaceByName error", err)
 			return

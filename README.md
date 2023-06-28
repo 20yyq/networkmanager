@@ -19,7 +19,7 @@ func main() {
 		Gateway string `json:"gateway"`
 	}{}
 	var object *networkmanager.Interface
-	if err := json.Unmarshal(b, config); err == nil {
+	if err := json.Unmarshal([]byte(josnStr), config); err == nil {
 		if object, err = networkmanager.InterfaceByName(config.Iface); err != nil {
 			fmt.Println("InterfaceByName error", err)
 			return
