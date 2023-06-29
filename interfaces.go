@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-21 08:16:59
-// @ LastEditTime : 2023-06-28 15:29:10
+// @ LastEditTime : 2023-06-29 11:14:49
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -13,7 +13,6 @@ package networkmanager
 import (
 	"net"
 	"sync"
-	"unsafe"
 	"syscall"
 	"encoding/binary"
 )
@@ -33,12 +32,12 @@ type Interface struct {
 }
 
 func InterfaceByName(ifname string) (*Interface, error) {
-	iface := &Interface{list: make(map[uint32]*NetlinkMessage), closes: make(chan struct{}), sock: syscall.SockaddrNetlink{Family: syscall.AF_NETLINK}}
+	iface := &Interface{list: make(map[uint32]*NetlinkMessage), closes: make(chan struct{}), sock: syscall.SockaddrNetlink{Family: AF_NETLINK}}
 	var err error
 	if iface.iface, err = net.InterfaceByName(ifname); err != nil {
 		return nil, err
 	}
-	iface.fd, err = syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW|syscall.SOCK_CLOEXEC, syscall.NETLINK_ROUTE)
+	iface.fd, err = syscall.Socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_ROUTE)
 	if err != nil {
 		return nil, err
 	}
@@ -61,18 +60,17 @@ func (ifi *Interface) Up() error {
 	if ifi.iface.Flags&0x01 != 0 {
 		return nil
 	}
-	nl, err := ifi.request(syscall.RTM_NEWLINK, syscall.NLM_F_ACK, 
-		IfInfomsgToSliceByte(syscall.AF_UNSPEC, syscall.IFF_UP, syscall.IFF_UP, int32(ifi.iface.Index)))
+	nl, err := ifi.request(RTM_NEWLINK, NLM_F_ACK, 
+		(&IfInfomsg{Family: AF_UNSPEC, Flags: IFF_UP, Change: IFF_UP, Index: int32(ifi.iface.Index)}).WireFormat())
 	if err == nil {
 		nl.mutex.Lock()
 		if nl.wait {
 			nl.cond.Wait()
+			nl.wait = false
 		}
-		nl.wait = false
 		nl.mutex.Unlock()
 		go ifi.deleteTimeOverNotify(nl)
-		err = DeserializeNlMsgerr(nl.Message[0])
-		if err == nil {
+		if err = DeserializeNlMsgerr(nl.Message[0]); err == nil {
 			ifi.iface.Flags++
 		}
 	}
@@ -83,18 +81,17 @@ func (ifi *Interface) Down() error {
 	if ifi.iface.Flags&0x01 != 1 {
 		return nil
 	}
-	nl, err := ifi.request(syscall.RTM_NEWLINK, syscall.NLM_F_ACK, 
-		IfInfomsgToSliceByte(syscall.AF_UNSPEC, syscall.IFF_UP, 0x00, int32(ifi.iface.Index)))
+	nl, err := ifi.request(RTM_NEWLINK, NLM_F_ACK, 
+		(&IfInfomsg{Family: AF_UNSPEC, Change: IFF_UP, Index: int32(ifi.iface.Index)}).WireFormat())
 	if err == nil {
 		nl.mutex.Lock()
 		if nl.wait {
 			nl.cond.Wait()
+			nl.wait = false
 		}
-		nl.wait = false
 		nl.mutex.Unlock()
 		go ifi.deleteTimeOverNotify(nl)
-		err = DeserializeNlMsgerr(nl.Message[0])
-		if err == nil {
+		if err = DeserializeNlMsgerr(nl.Message[0]); err == nil {
 			ifi.iface.Flags--
 		}
 	}
@@ -122,14 +119,14 @@ func (ifi *Interface) receive() {
 					if sec < 1 {
 						sec = 0xFFFFFFFFFFFFFFF
 					}
-					syscall.SetsockoptTimeval(ifi.fd, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &syscall.Timeval{Sec: sec})
+					syscall.SetsockoptTimeval(ifi.fd, SOL_SOCKET, SO_RCVTIMEO, &syscall.Timeval{Sec: sec})
 				}
 				continue
 			}
 			close(ifi.closes)
 			break
 		}
-		if nr < syscall.NLMSG_HDRLEN {
+		if nr < NLMSG_HDRLEN {
 			continue
 		}
 		if sock, _ := from.(*syscall.SockaddrNetlink); sock == nil || sock.Pid != ifi.sock.Pid {
@@ -169,58 +166,22 @@ func (ifi *Interface) request(proto, flags int, data []byte) (*NetlinkMessage, e
 	ifi.req++
 	nl := &NetlinkMessage{req: ifi.req, pid: ifi.pid, wait: true}
 	nl.cond = sync.NewCond(&nl.mutex)
-	req := syscall.NlMsghdr{
-		Len: uint32(syscall.SizeofNlMsghdr) + uint32(len(data)), Type: uint16(proto),
-		Seq: ifi.req, Flags: syscall.NLM_F_REQUEST | uint16(flags),
+	req := NlMsghdr{
+		Len: SizeofNlMsghdr + uint32(len(data)), Type: uint16(proto),
+		Seq: ifi.req, Flags: NLM_F_REQUEST | uint16(flags),
 	}
-	b, hdr := make([]byte, req.Len), (*(*[syscall.SizeofNlMsghdr]byte)(unsafe.Pointer(&req)))[:]
-	copy(b[:syscall.SizeofNlMsghdr], hdr)
-	copy(b[syscall.SizeofNlMsghdr:], data)
+	b := make([]byte, req.Len)
+	req.wireFormat(b[:SizeofNlMsghdr])
+	copy(b[SizeofNlMsghdr:], data)
 	ifi.list[ifi.req] = nl
 	if ifi.rcvtime < 1 {
 		ifi.rcvtime = 3
-		syscall.SetsockoptTimeval(ifi.fd, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &syscall.Timeval{Sec: ifi.rcvtime})
+		syscall.SetsockoptTimeval(ifi.fd, SOL_SOCKET, SO_RCVTIMEO, &syscall.Timeval{Sec: ifi.rcvtime})
 	}
 	if err := syscall.Sendto(ifi.fd, b, 0, &ifi.sock); err != nil {
 		return nil, err
 	}
 	return nl, nil
-}
-
-func IfInfomsgToSliceByte(family uint8, change, flags uint32, idx int32) []byte {
-	msg := &syscall.IfInfomsg{
-		Family: family, 
-		Change: change,
-		Flags: flags,
-		Index: idx,
-	}
-	return (*(*[syscall.SizeofIfInfomsg]byte)(unsafe.Pointer(msg)))[:]
-}
-
-func IfAddrmsgToSliceByte(family, prefixlen, flags, scope uint8, idx uint32) []byte {
-	msg := &syscall.IfAddrmsg{
-		Family: family, 
-		Prefixlen: prefixlen,
-		Flags: flags,
-		Scope: scope,
-		Index: idx,
-	}
-	return (*(*[syscall.SizeofIfAddrmsg]byte)(unsafe.Pointer(msg)))[:]
-}
-
-func RtMsgToSliceByte(family, dstlen, srclen, tos, table, protocol, scope, types uint8, flags uint32) []byte {
-	msg := &syscall.RtMsg{
-		Family:	family,
-		Dst_len:dstlen,
-		Src_len:srclen,
-		Tos:	tos,
-		Table:	table,
-		Protocol:protocol,
-		Scope:	scope,
-		Type:	types,
-		Flags:	flags,
-	}
-	return (*(*[syscall.SizeofRtMsg]byte)(unsafe.Pointer(msg)))[:]
 }
 
 func RtAttrToSliceByte(types uint16, ip net.IP, ips ...net.IP) []byte {
@@ -229,7 +190,7 @@ func RtAttrToSliceByte(types uint16, ip net.IP, ips ...net.IP) []byte {
 		nextIP, nextIps := ips[0], ips[1:]
 		children = RtAttrToSliceByte(types, nextIP, nextIps...)
 	}
-	l, next := uint16(syscall.SizeofRtAttr + len(ip) + len(children)), 0
+	l, next := uint16(SizeofRtAttr + len(ip) + len(children)), 0
 	data := make([]byte, l)
 	binary.LittleEndian.PutUint16(data[next:], l)
 	next += 2

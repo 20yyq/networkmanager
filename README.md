@@ -10,7 +10,7 @@ func main() {
 	josnStr, config := `
 		{
 			"iface": "eth0",
-			"address": "192.168.1.10",
+			"address": "192.168.1.58",
 			"gateway": "192.168.1.1"
 		}
 	`, &struct {
@@ -26,19 +26,16 @@ func main() {
 		}
 		fmt.Println("Up Interface", object.Up())
 		fmt.Println("AddIP", object.AddIP(networkmanager.Addrs{Local: net.ParseIP(config.Address)}))
-		if routeList, err := object.RouteList(); err != nil {
+		if routeList, err := object.RouteList(); err == nil {
 			fmt.Println("Get RouteList")
 			for _, val := range routeList {
 				fmt.Println("Print Route", *val)
 			}
 			fmt.Println("RouteList End")
 		}
-		rtmsg := &syscall.RtMsg{
-			Table: syscall.RT_TABLE_MAIN, Tos: 0, Protocol: syscall.RTPROT_KERNEL, Type: syscall.RTN_BROADCAST, Scope: syscall.RT_SCOPE_HOST,
-		}
-		fmt.Println("Gateway AddRoute", object.AddRoute(networkmanager.Routes{RtMsg: rtmsg, Gw: net.ParseIP(config.Gateway)}))
+		fmt.Println("Gateway AddRoute", object.AddRoute(networkmanager.Routes{Gw: net.ParseIP(config.Gateway)}))
 		go func() {
-			time.Sleep(time.Second*20)
+			time.Sleep(time.Second*10)
 			fmt.Println("os.Exit(1)")
 			os.Exit(1)
 		}()

@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-02-20 08:50:39
-// @ LastEditTime : 2023-06-28 15:40:38
+// @ LastEditTime : 2023-06-29 11:11:40
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Linux networkmanager 使用例子
@@ -11,8 +11,8 @@
 package networkmanager_test
 
 import (
+	"os"
 	"testing"
-	"syscall"
 	"encoding/json"
 	"time"
 	"github.com/20yyq/networkmanager"
@@ -45,12 +45,9 @@ func TestLinux(t *testing.T) {
 			}
 			t.Log("RouteList End")
 		}
-		rtmsg := &syscall.RtMsg{
-			Table: syscall.RT_TABLE_MAIN, Tos: 0, Protocol: syscall.RTPROT_KERNEL, Type: syscall.RTN_BROADCAST, Scope: syscall.RT_SCOPE_HOST,
-		}
-		t.Log("Gateway AddRoute", object.AddRoute(networkmanager.Routes{RtMsg: rtmsg, Gw: net.ParseIP(config.Gateway)}))
+		t.Log("Gateway AddRoute", object.AddRoute(networkmanager.Routes{Gw: net.ParseIP(config.Gateway)}))
 		go func() {
-			time.Sleep(time.Second*20)
+			time.Sleep(time.Second*10)
 			t.Log("os.Exit(1)")
 			os.Exit(1)
 		}()

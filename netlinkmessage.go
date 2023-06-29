@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-26 08:01:05
-// @ LastEditTime : 2023-06-28 16:53:03
+// @ LastEditTime : 2023-06-29 11:14:20
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -13,7 +13,6 @@ package networkmanager
 import (
 	"fmt"
 	"net"
-	"time"
 	"sync"
 	"unsafe"
 	"syscall"
@@ -21,10 +20,10 @@ import (
 )
 
 func DeserializeNlMsgerr(nlm *syscall.NetlinkMessage) error {
-	if len(nlm.Data) < syscall.SizeofNlMsgerr {
+	if len(nlm.Data) < SizeofNlMsgerr {
 		return syscall.Errno(34)
 	}
-	msg := (*syscall.NlMsgerr)(unsafe.Pointer(&nlm.Data[:syscall.SizeofNlMsgerr][0]))
+	msg := NewNlMsgerr(nlm.Data[:SizeofNlMsgerr])
 	if msg.Error < 0 {
 		msg.Error *= -1
 	}
@@ -53,24 +52,22 @@ type cacheInfo struct {
 
 func (nlm *NetlinkMessage) deserializeIfAddrmsgMessages(ifi *net.Interface) ([]*Addrs, error) {
 	var res []*Addrs
-	var ifaddr *syscall.IfAddrmsg
 	for _, m := range nlm.Message {
 		if l, err := syscall.ParseNetlinkRouteAttr(m); err == nil {
-			ifaddr = (*syscall.IfAddrmsg)(unsafe.Pointer(&m.Data[:syscall.SizeofIfAddrmsg][0]))
-			single := Addrs{label: "", flags: ifaddr.Flags, scope: ifaddr.Scope}
+			single := Addrs{IfAddrmsg: NewIfAddrmsg(m.Data[:SizeofIfAddrmsg]), label: ""}
 			for _, v := range l {
 				switch v.Attr.Type {
-				case syscall.IFA_ADDRESS:
-					single.netmask = net.IPv4(v.Value[0], v.Value[1], v.Value[2], v.Value[3])
-				case syscall.IFA_LOCAL:
+				case IFA_ADDRESS:
+					single.address = net.IPv4(v.Value[0], v.Value[1], v.Value[2], v.Value[3])
+				case IFA_LOCAL:
 					single.Local = net.IPv4(v.Value[0], v.Value[1], v.Value[2], v.Value[3])
-				case syscall.IFA_BROADCAST:
+				case IFA_BROADCAST:
 					single.Broadcast = net.IPv4(v.Value[0], v.Value[1], v.Value[2], v.Value[3])
-				case syscall.IFA_ANYCAST:
+				case IFA_ANYCAST:
 					single.Anycast = net.IPv4(v.Value[0], v.Value[1], v.Value[2], v.Value[3])
-				case syscall.IFA_LABEL:
+				case IFA_LABEL:
 					single.label = string(v.Value)
-				case syscall.IFA_CACHEINFO:
+				case IFA_CACHEINFO:
 					single.Cache = (*cacheInfo)(unsafe.Pointer(&v.Value[:16][0]))
 				default:
 					fmt.Println("IFLA_COST", v.Attr.Type, v.Value, single)
@@ -93,34 +90,34 @@ func (nlm *NetlinkMessage) deserializeRtMsgMessages(ifi *net.Interface) ([]*Rout
 	for _, m := range nlm.Message {
 		if l, err := syscall.ParseNetlinkRouteAttr(m); err == nil {
 			single := Routes{
-				RtMsg: (*syscall.RtMsg)(unsafe.Pointer(&m.Data[:syscall.SizeofRtMsg][0])),
+				RtMsg: NewRtMsg(m.Data[:SizeofRtMsg]),
 				oifIdx: -9999, iifIdx: -9999,
 			}
 			for _, v := range l {
 				switch v.Attr.Type {
-				case syscall.RTA_DST: // 目标地址
+				case RTA_DST: // 目标地址
 					single.Dst = net.IP(v.Value)
-				case syscall.RTA_SRC: // 源地址
+				case RTA_SRC: // 源地址
 					
-				case syscall.RTA_PREFSRC:
+				case RTA_PREFSRC:
 					single.Src = net.IP(v.Value)
-				case syscall.RTA_IIF: // 输入接口iifIdx
+				case RTA_IIF: // 输入接口iifIdx
 					single.iifIdx = int(binary.LittleEndian.Uint32(v.Value))
-				case syscall.RTA_OIF: // 输出接口oifIdx
+				case RTA_OIF: // 输出接口oifIdx
 					single.oifIdx = int(binary.LittleEndian.Uint32(v.Value))
-				case syscall.RTA_GATEWAY:
+				case RTA_GATEWAY:
 					single.Gw = net.IP(v.Value)
-				case syscall.RTA_PRIORITY:
+				case RTA_PRIORITY:
 					single.Priority = binary.LittleEndian.Uint32(v.Value)
-				case syscall.RTA_METRICS:
+				case RTA_METRICS:
 
-				case syscall.RTA_FLOW: // 所属领域
+				case RTA_FLOW: // 所属领域
 
-				case syscall.RTA_TABLE:
+				case RTA_TABLE:
 					
-				case syscall.RTA_CACHEINFO:
+				case RTA_CACHEINFO:
 					fmt.Println("syscall.RTA_CACHEINFO", v.Value)
-				case syscall.RTNLGRP_ND_USEROPT:
+				case RTNLGRP_ND_USEROPT:
 					fmt.Println("syscall.RTNLGRP_ND_USEROPT", v.Value)
 				default:
 					fmt.Println("RTA_MULTIPATH", v.Attr.Type, v.Value, single)
