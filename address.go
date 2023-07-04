@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-27 09:39:36
-// @ LastEditTime : 2023-06-29 11:15:21
+// @ LastEditTime : 2023-07-04 15:15:12
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -14,10 +14,13 @@ import (
 	"net"
 	"time"
 	"unsafe"
+
+	"github.com/20yyq/packet"
+	"github.com/20yyq/networkmanager/socket/rtnetlink"
 )
 
 type Addrs struct {
-	*IfAddrmsg
+	*packet.IfAddrmsg
 	label 		string
 	address 	net.IP
 	Local 		net.IP
@@ -27,27 +30,27 @@ type Addrs struct {
 	Cache 		*cacheInfo
 }
 
+type cacheInfo struct {
+	PreferredLft 	uint32
+	ValidLft 		uint32
+	CreadTime 		uint32
+	UpdateTime 		uint32
+}
+
 func (ifi *Interface) IPList() ([]*Addrs, error) {
 	var res []*Addrs
-	var nl *NetlinkMessage
+	var nl *rtnetlink.NetlinkMessage
 	var err error
-	count := 0
+	count, wait := 0, false
 Loop:
-	nl, err = ifi.request(RTM_GETADDR, NLM_F_DUMP, (&IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)}).WireFormat())
+	nl, err = ifi.conn.Exchange(RTM_GETADDR, NLM_F_DUMP, (&packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)}).WireFormat())
 	if err == nil {
 		count++
-		nl.mutex.Lock()
-		if nl.wait {
-			nl.cond.Wait()
-		}
-		nl.wait = false
-		nl.mutex.Unlock()
 		time.Sleep(time.Millisecond*50)
-		if res, err = nl.deserializeIfAddrmsgMessages(ifi.iface); res == nil && err == nil {
-			nl.wait = true
+		if res, err = ifi.deserializeIfAddrmsgMessages(nl); res == nil && err == nil {
+			wait = true
 		}
-		go ifi.deleteTimeOverNotify(nl)
-		if nl.wait && 3 > count {
+		if wait && 3 > count {
 			goto Loop
 		}
 	}
@@ -56,15 +59,8 @@ Loop:
 
 func (ifi *Interface) AddIP(a Addrs) error {
 	data := SerializeAddrs(&a, uint32(ifi.iface.Index))
-	nl, err := ifi.request(RTM_NEWADDR, NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, data)
+	nl, err := ifi.conn.Exchange(RTM_NEWADDR, NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, data)
 	if err == nil {
-		nl.mutex.Lock()
-		if nl.wait {
-			nl.cond.Wait()
-		}
-		nl.wait = false
-		nl.mutex.Unlock()
-		go ifi.deleteTimeOverNotify(nl)
 		err = DeserializeNlMsgerr(nl.Message[0])
 	}
 	return err
@@ -72,15 +68,8 @@ func (ifi *Interface) AddIP(a Addrs) error {
 
 func (ifi *Interface) RemoveIP(a Addrs) error {
 	data := SerializeAddrs(&a, uint32(ifi.iface.Index))
-	nl, err := ifi.request(RTM_DELADDR, NLM_F_ACK, data)
+	nl, err := ifi.conn.Exchange(RTM_DELADDR, NLM_F_ACK, data)
 	if err == nil {
-		nl.mutex.Lock()
-		if nl.wait {
-			nl.cond.Wait()
-		}
-		nl.wait = false
-		nl.mutex.Unlock()
-		go ifi.deleteTimeOverNotify(nl)
 		err = DeserializeNlMsgerr(nl.Message[0])
 	}
 	return err
@@ -93,15 +82,8 @@ func (ifi *Interface) ReplaceIP(a *Addrs) error {
 		}
 	}
 	data := SerializeAddrs(a, uint32(ifi.iface.Index))
-	nl, err := ifi.request(RTM_NEWADDR, NLM_F_REQUEST|NLM_F_ACK|NLM_F_REPLACE, data)
+	nl, err := ifi.conn.Exchange(RTM_NEWADDR, NLM_F_ACK|NLM_F_REPLACE, data)
 	if err == nil {
-		nl.mutex.Lock()
-		if nl.wait {
-			nl.cond.Wait()
-		}
-		nl.wait = false
-		nl.mutex.Unlock()
-		go ifi.deleteTimeOverNotify(nl)
 		err = DeserializeNlMsgerr(nl.Message[0])
 	}
 	return err
@@ -117,7 +99,7 @@ func SerializeAddrs(a *Addrs, idx uint32) []byte {
 	mask := a.Local.DefaultMask()
 	prefixlen, masklen := mask.Size()
 	if a.IfAddrmsg == nil {
-		a.IfAddrmsg = &IfAddrmsg{}
+		a.IfAddrmsg = &packet.IfAddrmsg{}
 	}
 	a.Prefixlen, a.Family, a.Index = uint8(prefixlen), uint8(family), idx
 	data := a.WireFormat()

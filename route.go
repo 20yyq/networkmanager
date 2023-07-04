@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-27 09:38:13
-// @ LastEditTime : 2023-06-29 11:13:38
+// @ LastEditTime : 2023-07-04 15:15:37
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -11,14 +11,16 @@
 package networkmanager
 
 import (
-	"log"
 	"net"
 	"time"
 	"encoding/binary"
+
+	"github.com/20yyq/packet"
+	"github.com/20yyq/networkmanager/socket/rtnetlink"
 )
 
 type Routes struct {
-	*RtMsg
+	*packet.RtMsg
 	iifIdx 		int
 	oifIdx 		int
 	Priority 	uint32
@@ -29,25 +31,18 @@ type Routes struct {
 
 func (ifi *Interface) RouteList() ([]*Routes, error) {
 	var res []*Routes
-	var nl *NetlinkMessage
+	var nl *rtnetlink.NetlinkMessage
 	var err error
-	count := 0
+	count, wait := 0, false
 Loop:
-	nl, err = ifi.request(RTM_GETROUTE, NLM_F_DUMP, (&IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)}).WireFormat())
+	nl, err = ifi.conn.Exchange(RTM_GETROUTE, NLM_F_DUMP, (&packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)}).WireFormat())
 	if err == nil {
 		count++
-		nl.mutex.Lock()
-		if nl.wait {
-			nl.cond.Wait()
-		}
-		nl.wait = false
-		nl.mutex.Unlock()
 		time.Sleep(time.Millisecond*100)
-		if res, err = nl.deserializeRtMsgMessages(ifi.iface); res == nil && err == nil {
-			nl.wait = true
+		if res, err = ifi.deserializeRtMsgMessages(nl); res == nil && err == nil {
+			wait = true
 		}
-		go ifi.deleteTimeOverNotify(nl)
-		if nl.wait && 3 > count {
+		if wait && 3 > count {
 			goto Loop
 		}
 	}
@@ -57,15 +52,8 @@ Loop:
 
 func (ifi *Interface) AddRoute(r Routes) error {
 	data := SerializeRoutes(&r, uint32(ifi.iface.Index))
-	nl, err := ifi.request(RTM_NEWROUTE, NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, data)
+	nl, err := ifi.conn.Exchange(RTM_NEWROUTE, NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, data)
 	if err == nil {
-		nl.mutex.Lock()
-		if nl.wait {
-			nl.cond.Wait()
-		}
-		nl.wait = false
-		nl.mutex.Unlock()
-		go ifi.deleteTimeOverNotify(nl)
 		err = DeserializeNlMsgerr(nl.Message[0])
 	}
 	return err
@@ -73,15 +61,8 @@ func (ifi *Interface) AddRoute(r Routes) error {
 
 func (ifi *Interface) RemoveRoute(r Routes) error {
 	data := SerializeRoutes(&r, uint32(ifi.iface.Index))
-	nl, err := ifi.request(RTM_DELROUTE, NLM_F_ACK, data)
+	nl, err := ifi.conn.Exchange(RTM_DELROUTE, NLM_F_ACK, data)
 	if err == nil {
-		nl.mutex.Lock()
-		if nl.wait {
-			nl.cond.Wait()
-		}
-		nl.wait = false
-		nl.mutex.Unlock()
-		go ifi.deleteTimeOverNotify(nl)
 		err = DeserializeNlMsgerr(nl.Message[0])
 	}
 	return err
@@ -89,15 +70,8 @@ func (ifi *Interface) RemoveRoute(r Routes) error {
 
 func (ifi *Interface) ReplaceRoute(r *Routes) error {
 	data := SerializeRoutes(r, uint32(ifi.iface.Index))
-	nl, err := ifi.request(RTM_NEWROUTE, NLM_F_REQUEST|NLM_F_ACK|NLM_F_REPLACE, data)
+	nl, err := ifi.conn.Exchange(RTM_NEWROUTE, NLM_F_ACK|NLM_F_REPLACE, data)
 	if err == nil {
-		nl.mutex.Lock()
-		if nl.wait {
-			nl.cond.Wait()
-		}
-		nl.wait = false
-		nl.mutex.Unlock()
-		go ifi.deleteTimeOverNotify(nl)
 		err = DeserializeNlMsgerr(nl.Message[0])
 	}
 	return err
@@ -105,10 +79,10 @@ func (ifi *Interface) ReplaceRoute(r *Routes) error {
 
 func SerializeRoutes(r *Routes, idx uint32) []byte {
 	if r.RtMsg == nil {
-		r.RtMsg = &RtMsg{}
+		r.RtMsg = &packet.RtMsg{}
 	}
 	r.Family = AF_INET
-	data := make([]byte, SizeofRtMsg)
+	data := make([]byte, packet.SizeofRtMsg)
 	data = appendSliceByte(data, RTA_OIF, binary.LittleEndian.AppendUint32(nil, idx))
 	if r.Priority > 0 {
 		data = appendSliceByte(data, RTA_PRIORITY, binary.LittleEndian.AppendUint32(nil, r.Priority))
@@ -144,6 +118,6 @@ func SerializeRoutes(r *Routes, idx uint32) []byte {
 		}
 	}
 	res := r.WireFormat()
-	copy(data[:SizeofRtMsg], res)
+	copy(data[:packet.SizeofRtMsg], res)
 	return data
 }
