@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-02-20 08:50:39
-// @ LastEditTime : 2023-07-06 11:24:01
+// @ LastEditTime : 2023-07-06 17:00:09
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Linux networkmanager 使用例子
@@ -12,6 +12,7 @@ package networkmanager_test
 
 import (
 	"os"
+	"os/exec"
 	"net"
 	"log"
 	"testing"
@@ -27,11 +28,13 @@ var josnStr, config = `
 		"iface": "eth0",
 		"address": "192.168.1.58",
 		"gateway": "192.168.1.1"
+		"dns": "192.168.1.1"
 	}
 `, &struct {
 	Iface 	string `json:"iface"`
 	Address string `json:"address"`
 	Gateway string `json:"gateway"`
+	DNS 	string `json:"dns"`
 }{}
 
 func TestLinux(t *testing.T) {
@@ -47,6 +50,7 @@ func TestLinux(t *testing.T) {
 	// custom(object)
 	// DHCP获取IP
 	dhcp(object)
+	exec.Command("bash", "-c", `echo "nameserver `+config.DNS+`" >> /etc/resolv.conf`).CombinedOutput()
 	object.Close()
 	t.Log("end")
 }
@@ -86,10 +90,11 @@ func dhcp(manager *networkmanager.Interface) {
 	for _, v := range dhc1.Options {
 		if v.Types == uint8(packet.DHCP_Requested_IP_Address) {
 			config.Address = (*packet.IPv4)(v.Value).String()
-			log.Println("Address: ", config.Gateway)
+			log.Println("Address: ", config.Address)
 		}
 		if v.Types == uint8(packet.DHCP_Router) {
 			config.Gateway = (*packet.IPv4)(v.Value).String()
+			config.DNS = config.Gateway
 			log.Println("Gateway: ", config.Gateway)
 		}
 	}

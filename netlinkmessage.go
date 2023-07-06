@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-26 08:01:05
-// @ LastEditTime : 2023-06-29 11:14:20
+// @ LastEditTime : 2023-07-06 17:25:32
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -52,6 +52,7 @@ type cacheInfo struct {
 
 func (nlm *NetlinkMessage) deserializeIfAddrmsgMessages(ifi *net.Interface) ([]*Addrs, error) {
 	var res []*Addrs
+	name := ifi.iface.Name + string([]byte{0})
 	for _, m := range nlm.Message {
 		if l, err := syscall.ParseNetlinkRouteAttr(m); err == nil {
 			single := Addrs{IfAddrmsg: NewIfAddrmsg(m.Data[:SizeofIfAddrmsg]), label: ""}
@@ -73,7 +74,7 @@ func (nlm *NetlinkMessage) deserializeIfAddrmsgMessages(ifi *net.Interface) ([]*
 					fmt.Println("IFLA_COST", v.Attr.Type, v.Value, single)
 				}
 			}
-			if single.label == ifi.Name {
+			if single.label == name {
 				res = append(res, &single)
 			}
 			continue

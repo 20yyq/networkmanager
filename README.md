@@ -1,7 +1,7 @@
 # networkmanager
 
 ## 简介
-	这是一个基于 netlink 开发的 GoLang 以太网管理包。
+	这是一个基于 netlink 开发的 GoLang 以太网管理包。请使用root用户运行软件，建议不要使用其他任何的网络管理工具。可以在纯Linux内核系统下运行。
 	
 # 例子
 ```go
@@ -11,11 +11,13 @@ var josnStr, config = `
 		"iface": "eth0",
 		"address": "192.168.1.58",
 		"gateway": "192.168.1.1"
+		"dns": "192.168.1.1"
 	}
 `, &struct {
 	Iface 	string `json:"iface"`
 	Address string `json:"address"`
 	Gateway string `json:"gateway"`
+	DNS 	string `json:"dns"`
 }{}
 
 func main() {
@@ -31,7 +33,8 @@ func main() {
 	// custom(object)
 	// DHCP获取IP
 	dhcp(object)
-	manager.Close()
+	exec.Command("bash", "-c", `echo "nameserver `+config.DNS+`" >> /etc/resolv.conf`).CombinedOutput()
+	object.Close()
 	fmt.Println("end")
 }
 
@@ -69,10 +72,11 @@ func dhcp(manager *networkmanager.Interface) {
 	for _, v := range dhc1.Options {
 		if v.Types == uint8(packet.DHCP_Requested_IP_Address) {
 			config.Address = (*packet.IPv4)(v.Value).String()
-			fmt.Println("Address: ", config.Gateway)
+			fmt.Println("Address: ", config.Address)
 		}
 		if v.Types == uint8(packet.DHCP_Router) {
 			config.Gateway = (*packet.IPv4)(v.Value).String()
+			config.DNS = config.Gateway
 			fmt.Println("Gateway: ", config.Gateway)
 		}
 	}

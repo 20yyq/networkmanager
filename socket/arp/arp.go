@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-29 15:13:47
-// @ LastEditTime : 2023-07-04 14:15:49
+// @ LastEditTime : 2023-07-06 11:57:14
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -74,28 +74,32 @@ func (ac *ArpConn) Write(b []byte) error {
 }
 
 func (ac *ArpConn) Request(ip net.IP) error {
-	b := (&packet.ArpPacket{
+	arpp := &packet.ArpPacket{
 		HeadMAC: [2]packet.HardwareAddr{packet.Broadcast, (packet.HardwareAddr)(ac.hardware)},
 		FrameType: ETH_P_ARP, HardwareType: packet.ARP_ETHERNETTYPE, ProtocolType: ETH_P_IP,
 		HardwareLen: 6, IPLen: 4, Operation: packet.ARP_REQUEST,
 		SendHardware: ([6]byte)(ac.hardware),
-		SendIP: ([4]byte)(ac.addr.To4()),
+		SendIP: packet.IPv4{},
 		TargetHardware: packet.Broadcast,
 		TargetIP: ([4]byte)(ip.To4()),
-	}).WireFormat()
-	return ac.Write(b)
+	}
+	if ac.addr.To4() != nil {
+		arpp.SendIP = ([4]byte)(ac.addr.To4())
+	}
+	return ac.Write(arpp.WireFormat())
 }
 
 func (ac *ArpConn) GetAllIPMAC(out time.Duration) []*packet.ArpPacket {
-	go func() {
-		targetIP := ac.addr.To4()
+	b := make([]byte, 128)
+	n, _ := ac.Read(b)
+	go func(p *packet.ArpPacket) {
 		for i := 0; i < 255; i++ {
-			targetIP[3] = byte(i)
-			ac.Request(net.IP(targetIP))
+			p.SendIP[3] = byte(i)
+			ac.Request(net.IP(p.SendIP[:]))
 		}
-	}()
+	}(packet.NewArpPacket(([42]byte)(b[:n])))
 	var list []*packet.ArpPacket
-	over, b := false, make([]byte, 128)
+	over := false
 	timer := time.AfterFunc(out, func () { over = true; })
 	for !over {
 		n, err := ac.Read(b)
