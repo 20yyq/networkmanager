@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-29 15:13:47
-// @ LastEditTime : 2023-07-06 11:55:38
+// @ LastEditTime : 2023-07-07 10:57:23
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -25,8 +25,8 @@ type DhcpV4Conn struct {
 	rc 		syscall.RawConn
 }
 
-func NewDhcpV4Conn(name string, addr packet.IPv4) (*DhcpV4Conn, error) {
-	listen, err := net.ListenUDP("udp4", &net.UDPAddr{net.IPv4bcast, packet.DHCP_ClientPort, name})
+func NewDhcpV4Conn(dev string, addr packet.IPv4) (*DhcpV4Conn, error) {
+	listen, err := net.ListenUDP("udp4", &net.UDPAddr{net.IPv4bcast, packet.DHCP_ClientPort, dev})
 	if err != nil {
 		return nil, err
 	}
@@ -37,9 +37,18 @@ func NewDhcpV4Conn(name string, addr packet.IPv4) (*DhcpV4Conn, error) {
 		return nil, err
 	}
 	fun := func(fd uintptr) {
+		if err = syscall.BindToDevice(int(fd), dev); err != nil {
+			return
+		}
 		err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_BROADCAST, 1)
+		if err != nil {
+			return
+		}
 	}
-	err = conn.rc.Control(fun)
+	if e := conn.rc.Control(fun); e != nil {
+		conn.Close()
+		return nil, e
+	}
 	if err != nil {
 		conn.Close()
 		return nil, err

@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-02-20 08:50:39
-// @ LastEditTime : 2023-07-06 17:00:09
+// @ LastEditTime : 2023-07-07 10:44:14
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Linux networkmanager 使用例子
@@ -76,7 +76,7 @@ func custom(manager *networkmanager.Interface) {
 func dhcp(manager *networkmanager.Interface) {
 	rt := networkmanager.Routes{Gw: net.IP{0,0,0,0}}
 	log.Println("AddRoute: ", manager.AddRoute(rt))
-	conn, _ := dhcpv4.NewDhcpV4Conn("dhcpv4", packet.IPv4{255,255,255,255})
+	conn, _ := dhcpv4.NewDhcpV4Conn(config.Iface, packet.IPv4{255,255,255,255})
 	dhc1, err := conn.Discover()
 	if err != nil {
 		log.Println("Discover err: ", err)

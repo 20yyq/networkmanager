@@ -58,7 +58,7 @@ func custom(manager *networkmanager.Interface) {
 func dhcp(manager *networkmanager.Interface) {
 	rt := networkmanager.Routes{Gw: net.IP{0,0,0,0}}
 	fmt.Println("AddRoute: ", manager.AddRoute(rt))
-	conn, _ := dhcpv4.NewDhcpV4Conn("dhcpv4", packet.IPv4{255,255,255,255})
+	conn, _ := dhcpv4.NewDhcpV4Conn(config.Iface, packet.IPv4{255,255,255,255})
 	dhc1, err := conn.Discover()
 	if err != nil {
 		fmt.Println("Discover err: ", err)

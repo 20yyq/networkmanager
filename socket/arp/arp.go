@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-29 15:13:47
-// @ LastEditTime : 2023-07-06 11:57:14
+// @ LastEditTime : 2023-07-07 14:41:31
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -33,33 +33,44 @@ const (
 type ArpConn struct {
 	*socket.Socket
 
-	ifindex 	int
-	proto 		uint16
-	addr 		net.IP
-	hardware 	net.HardwareAddr
+	control socket.RawConnControl
+	lsa 	*syscall.SockaddrLinklayer
+	addr 	net.IP
 }
 
 func NewArpConn(name string, ifi *net.Interface) (*ArpConn, error) {
 	var err error
-	conn := &ArpConn{ifindex: ifi.Index, proto: binary.BigEndian.Uint16(binary.LittleEndian.AppendUint16(nil, ETH_P_ARP))}
-	conn.Socket, err = socket.NewSocket(syscall.AF_PACKET, syscall.SOCK_RAW|syscall.SOCK_CLOEXEC|syscall.SOCK_NONBLOCK, int(conn.proto), name)
+	conn, proto := &ArpConn{addr: net.ParseIP("0.0.0.0")}, binary.BigEndian.Uint16(binary.LittleEndian.AppendUint16(nil, ETH_P_ARP))
+	conn.Socket, err = socket.NewSocket(syscall.AF_PACKET, syscall.SOCK_RAW|syscall.SOCK_CLOEXEC|syscall.SOCK_NONBLOCK, int(proto), name)
 	if err != nil {
 		return nil, err
 	}
-	lsa := &syscall.SockaddrLinklayer{Protocol: conn.proto, Ifindex: conn.ifindex}
-	var sal syscall.Sockaddr
-	if sal, err = conn.Bind(lsa); err != nil {
-		conn.Close()
+	conn.control, _ = conn.Socket.Control()
+	fun := func(fd uintptr) {
+		conn.lsa = &syscall.SockaddrLinklayer{Protocol: proto, Ifindex: ifi.Index}
+		if err = syscall.Bind(int(fd), conn.lsa); err != nil {
+			return
+		}
+		var sal syscall.Sockaddr
+		if sal, err = syscall.Getsockname(int(fd)); err != nil {
+			return
+		}
+		conn.lsa = sal.(*syscall.SockaddrLinklayer)
+	}
+	if e := conn.control(fun); e != nil {
+		conn.Socket.Close()
+		return nil, e
+	}
+	if err != nil {
+		conn.Socket.Close()
 		return nil, err
 	}
-	lsa = sal.(*syscall.SockaddrLinklayer)
 	l, _ := ifi.Addrs()
-	conn.addr = net.ParseIP("0.0.0.0")
-	conn.hardware = net.HardwareAddr(lsa.Addr[:])
 	if 0 < len(l) {
 		conn.addr = (l[0].(*net.IPNet)).IP
 	}
 	return conn, err
+
 }
 
 func (ac *ArpConn) Read(b []byte) (n int, err error) {
@@ -68,17 +79,15 @@ func (ac *ArpConn) Read(b []byte) (n int, err error) {
 }
 
 func (ac *ArpConn) Write(b []byte) error {
-	lsa := &syscall.SockaddrLinklayer{Ifindex: ac.ifindex, Protocol: ac.proto, Halen: uint8(len(ac.hardware))}
-	copy(lsa.Addr[:], ac.hardware)
-	return ac.Sendto(b, 0, lsa)
+	return ac.Sendto(b, 0, ac.lsa)
 }
 
 func (ac *ArpConn) Request(ip net.IP) error {
 	arpp := &packet.ArpPacket{
-		HeadMAC: [2]packet.HardwareAddr{packet.Broadcast, (packet.HardwareAddr)(ac.hardware)},
+		HeadMAC: [2]packet.HardwareAddr{packet.Broadcast, (packet.HardwareAddr)(ac.lsa.Addr[:ac.lsa.Halen])},
 		FrameType: ETH_P_ARP, HardwareType: packet.ARP_ETHERNETTYPE, ProtocolType: ETH_P_IP,
 		HardwareLen: 6, IPLen: 4, Operation: packet.ARP_REQUEST,
-		SendHardware: ([6]byte)(ac.hardware),
+		SendHardware: ([6]byte)(ac.lsa.Addr[:ac.lsa.Halen]),
 		SendIP: packet.IPv4{},
 		TargetHardware: packet.Broadcast,
 		TargetIP: ([4]byte)(ip.To4()),

@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-07-01 09:08:50
-// @ LastEditTime : 2023-07-04 15:07:45
+// @ LastEditTime : 2023-07-07 09:25:50
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -17,11 +17,14 @@ import (
 	"sync/atomic"
 )
 
+type RawConnControl func(func(uintptr)) error
+
 type Socket struct {
 	f 		*os.File
 	rc 		syscall.RawConn
 
 	closed 	uint32
+	isctl 	uint32
 }
 
 func NewSocket(domain, typ, proto int, name string) (*Socket, error) {
@@ -102,23 +105,11 @@ func (s *Socket) Sendmsg(p, oob []byte, to syscall.Sockaddr, flags int) (n int, 
 	return
 }
 
-func (s *Socket) Bind(sal syscall.Sockaddr) (syscall.Sockaddr, error) {
-	if atomic.LoadUint32(&s.closed) != 0 {
-		return nil, os.NewSyscallError("BindSockaddrLinklayer closed", nil)
+func (s *Socket) Control() (RawConnControl, error) {
+	if atomic.AddUint32(&s.isctl, 1) < 1 {
+		return nil, os.NewSyscallError("Control busy", nil)
 	}
-	var err error
-	fun := func(fd uintptr) {
-		err = syscall.Bind(int(fd), sal)
-	}
-	if err = s.rc.Control(fun); err == nil {
-		fun = func(fd uintptr) {
-			if lsa, err := syscall.Getsockname(int(fd)); err == nil {
-				sal = lsa
-			}
-		}
-		err = s.rc.Control(fun)
-	}
-	return sal, err
+	return s.rc.Control, nil
 }
 
 func (s *Socket) SetReadDeadline(d time.Duration) error {

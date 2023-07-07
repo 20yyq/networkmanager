@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-29 15:13:47
-// @ LastEditTime : 2023-07-04 15:13:11
+// @ LastEditTime : 2023-07-07 14:43:33
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -126,11 +126,13 @@ func (rt *RtnetlinkConn) receive() {
 				notifyList := make(map[uint32]*NetlinkMessage)
 				rt.mutex.RLock()
 				for _, v := range nl {
-					if l, _ := rt.list[v.Header.Seq]; l != nil {
-						l.Message = append(l.Message, &v)
-						if val, _ := notifyList[v.Header.Seq]; val == nil {
-							notifyList[v.Header.Seq] = l
+					tmp := v
+					if l, _ := rt.list[tmp.Header.Seq]; l != nil {
+						l.Message = append(l.Message, &tmp)
+						if val, _ := notifyList[tmp.Header.Seq]; val == nil {
+							notifyList[tmp.Header.Seq] = l
 						}
+						continue
 					}
 				}
 				rt.mutex.RUnlock()
