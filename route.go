@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-27 09:38:13
-// @ LastEditTime : 2023-07-04 15:15:37
+// @ LastEditTime : 2023-07-08 16:09:02
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -12,7 +12,6 @@ package networkmanager
 
 import (
 	"net"
-	"time"
 	"encoding/binary"
 
 	"github.com/20yyq/packet"
@@ -35,10 +34,10 @@ func (ifi *Interface) RouteList() ([]*Routes, error) {
 	var err error
 	count, wait := 0, false
 Loop:
-	nl, err = ifi.conn.Exchange(RTM_GETROUTE, NLM_F_DUMP, (&packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)}).WireFormat())
+	nl, err = ifi.conn.Exchange(20, RTM_GETROUTE, NLM_F_DUMP, (&packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)}).WireFormat())
 	if err == nil {
+		<-nl.Notify
 		count++
-		time.Sleep(time.Millisecond*100)
 		if res, err = ifi.deserializeRtMsgMessages(nl); res == nil && err == nil {
 			wait = true
 		}
@@ -52,8 +51,9 @@ Loop:
 
 func (ifi *Interface) AddRoute(r Routes) error {
 	data := SerializeRoutes(&r, uint32(ifi.iface.Index))
-	nl, err := ifi.conn.Exchange(RTM_NEWROUTE, NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, data)
+	nl, err := ifi.conn.Exchange(101, RTM_NEWROUTE, NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, data)
 	if err == nil {
+		<-nl.Notify
 		err = DeserializeNlMsgerr(nl.Message[0])
 	}
 	return err
@@ -61,8 +61,9 @@ func (ifi *Interface) AddRoute(r Routes) error {
 
 func (ifi *Interface) RemoveRoute(r Routes) error {
 	data := SerializeRoutes(&r, uint32(ifi.iface.Index))
-	nl, err := ifi.conn.Exchange(RTM_DELROUTE, NLM_F_ACK, data)
+	nl, err := ifi.conn.Exchange(101, RTM_DELROUTE, NLM_F_ACK, data)
 	if err == nil {
+		<-nl.Notify
 		err = DeserializeNlMsgerr(nl.Message[0])
 	}
 	return err
@@ -70,8 +71,9 @@ func (ifi *Interface) RemoveRoute(r Routes) error {
 
 func (ifi *Interface) ReplaceRoute(r *Routes) error {
 	data := SerializeRoutes(r, uint32(ifi.iface.Index))
-	nl, err := ifi.conn.Exchange(RTM_NEWROUTE, NLM_F_ACK|NLM_F_REPLACE, data)
+	nl, err := ifi.conn.Exchange(101, RTM_NEWROUTE, NLM_F_ACK|NLM_F_REPLACE, data)
 	if err == nil {
+		<-nl.Notify
 		err = DeserializeNlMsgerr(nl.Message[0])
 	}
 	return err

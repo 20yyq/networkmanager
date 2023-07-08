@@ -70,11 +70,11 @@ func dhcp(manager *networkmanager.Interface) {
 		return
 	}
 	for _, v := range dhc1.Options {
-		if v.Types == uint8(packet.DHCP_Requested_IP_Address) {
+		if v.Code == uint8(packet.DHCP_Requested_IP_Address) {
 			config.Address = (*packet.IPv4)(v.Value).String()
 			fmt.Println("Address: ", config.Address)
 		}
-		if v.Types == uint8(packet.DHCP_Router) {
+		if v.Code == uint8(packet.DHCP_Router) {
 			config.Gateway = (*packet.IPv4)(v.Value).String()
 			config.DNS = config.Gateway
 			fmt.Println("Gateway: ", config.Gateway)

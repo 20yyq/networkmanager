@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-27 09:39:36
-// @ LastEditTime : 2023-07-04 15:15:12
+// @ LastEditTime : 2023-07-08 16:08:37
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -12,7 +12,6 @@ package networkmanager
 
 import (
 	"net"
-	"time"
 	"unsafe"
 
 	"github.com/20yyq/packet"
@@ -43,10 +42,11 @@ func (ifi *Interface) IPList() ([]*Addrs, error) {
 	var err error
 	count, wait := 0, false
 Loop:
-	nl, err = ifi.conn.Exchange(RTM_GETADDR, NLM_F_DUMP, (&packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)}).WireFormat())
+	nl, err = ifi.conn.Exchange(20, RTM_GETADDR, NLM_F_DUMP,
+		(&packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)}).WireFormat())
 	if err == nil {
+		<-nl.Notify
 		count++
-		time.Sleep(time.Millisecond*50)
 		if res, err = ifi.deserializeIfAddrmsgMessages(nl); res == nil && err == nil {
 			wait = true
 		}
@@ -59,8 +59,9 @@ Loop:
 
 func (ifi *Interface) AddIP(a Addrs) error {
 	data := SerializeAddrs(&a, uint32(ifi.iface.Index))
-	nl, err := ifi.conn.Exchange(RTM_NEWADDR, NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, data)
+	nl, err := ifi.conn.Exchange(101, RTM_NEWADDR, NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, data)
 	if err == nil {
+		<-nl.Notify
 		err = DeserializeNlMsgerr(nl.Message[0])
 	}
 	return err
@@ -68,8 +69,9 @@ func (ifi *Interface) AddIP(a Addrs) error {
 
 func (ifi *Interface) RemoveIP(a Addrs) error {
 	data := SerializeAddrs(&a, uint32(ifi.iface.Index))
-	nl, err := ifi.conn.Exchange(RTM_DELADDR, NLM_F_ACK, data)
+	nl, err := ifi.conn.Exchange(101, RTM_DELADDR, NLM_F_ACK, data)
 	if err == nil {
+		<-nl.Notify
 		err = DeserializeNlMsgerr(nl.Message[0])
 	}
 	return err
@@ -82,8 +84,9 @@ func (ifi *Interface) ReplaceIP(a *Addrs) error {
 		}
 	}
 	data := SerializeAddrs(a, uint32(ifi.iface.Index))
-	nl, err := ifi.conn.Exchange(RTM_NEWADDR, NLM_F_ACK|NLM_F_REPLACE, data)
+	nl, err := ifi.conn.Exchange(101, RTM_NEWADDR, NLM_F_ACK|NLM_F_REPLACE, data)
 	if err == nil {
+		<-nl.Notify
 		err = DeserializeNlMsgerr(nl.Message[0])
 	}
 	return err

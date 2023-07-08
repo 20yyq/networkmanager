@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-26 08:01:05
-// @ LastEditTime : 2023-07-06 17:25:32
+// @ LastEditTime : 2023-07-08 15:39:34
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -17,13 +17,16 @@ import (
 	"unsafe"
 	"syscall"
 	"encoding/binary"
+
+	"github.com/20yyq/packet"
+	"github.com/20yyq/networkmanager/socket/rtnetlink"
 )
 
 func DeserializeNlMsgerr(nlm *syscall.NetlinkMessage) error {
-	if len(nlm.Data) < SizeofNlMsgerr {
+	if len(nlm.Data) < packet.SizeofNlMsgerr {
 		return syscall.Errno(34)
 	}
-	msg := NewNlMsgerr(nlm.Data[:SizeofNlMsgerr])
+	msg := packet.NewNlMsgerr(([packet.SizeofNlMsgerr]byte)(nlm.Data[:packet.SizeofNlMsgerr]))
 	if msg.Error < 0 {
 		msg.Error *= -1
 	}
@@ -43,19 +46,12 @@ type NetlinkMessage struct {
 	Message []*syscall.NetlinkMessage
 }
 
-type cacheInfo struct {
-	PreferredLft 	uint32
-	ValidLft 		uint32
-	CreadTime 		uint32
-	UpdateTime 		uint32
-}
-
-func (nlm *NetlinkMessage) deserializeIfAddrmsgMessages(ifi *net.Interface) ([]*Addrs, error) {
+func (ifi *Interface) deserializeIfAddrmsgMessages(nlm *rtnetlink.NetlinkMessage) ([]*Addrs, error) {
 	var res []*Addrs
 	name := ifi.iface.Name + string([]byte{0})
 	for _, m := range nlm.Message {
 		if l, err := syscall.ParseNetlinkRouteAttr(m); err == nil {
-			single := Addrs{IfAddrmsg: NewIfAddrmsg(m.Data[:SizeofIfAddrmsg]), label: ""}
+			single := Addrs{IfAddrmsg: packet.NewIfAddrmsg(([packet.SizeofIfAddrmsg]byte)(m.Data[:packet.SizeofIfAddrmsg])), label: ""}
 			for _, v := range l {
 				switch v.Attr.Type {
 				case IFA_ADDRESS:
@@ -86,12 +82,12 @@ func (nlm *NetlinkMessage) deserializeIfAddrmsgMessages(ifi *net.Interface) ([]*
 	return res, nil
 }
 
-func (nlm *NetlinkMessage) deserializeRtMsgMessages(ifi *net.Interface) ([]*Routes, error) {
+func (ifi *Interface) deserializeRtMsgMessages(nlm *rtnetlink.NetlinkMessage) ([]*Routes, error) {
 	var res []*Routes
 	for _, m := range nlm.Message {
 		if l, err := syscall.ParseNetlinkRouteAttr(m); err == nil {
 			single := Routes{
-				RtMsg: NewRtMsg(m.Data[:SizeofRtMsg]),
+				RtMsg: packet.NewRtMsg(([packet.SizeofRtMsg]byte)(m.Data[:packet.SizeofRtMsg])),
 				oifIdx: -9999, iifIdx: -9999,
 			}
 			for _, v := range l {
@@ -124,7 +120,7 @@ func (nlm *NetlinkMessage) deserializeRtMsgMessages(ifi *net.Interface) ([]*Rout
 					fmt.Println("RTA_MULTIPATH", v.Attr.Type, v.Value, single)
 				}
 			}
-			if single.oifIdx == ifi.Index {
+			if single.oifIdx == ifi.iface.Index {
 				res = append(res, &single)
 			}
 			continue

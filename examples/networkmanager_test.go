@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-02-20 08:50:39
-// @ LastEditTime : 2023-07-07 10:44:14
+// @ LastEditTime : 2023-07-08 15:57:36
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Linux networkmanager 使用例子
@@ -27,7 +27,7 @@ var josnStr, config = `
 	{
 		"iface": "eth0",
 		"address": "192.168.1.58",
-		"gateway": "192.168.1.1"
+		"gateway": "192.168.1.1",
 		"dns": "192.168.1.1"
 	}
 `, &struct {
@@ -47,9 +47,9 @@ func TestLinux(t *testing.T) {
 	}
 	t.Log("Up Interface", object.Up())
 	// 静态IP
-	// custom(object)
+	custom(object)
 	// DHCP获取IP
-	dhcp(object)
+	// dhcp(object)
 	exec.Command("bash", "-c", `echo "nameserver `+config.DNS+`" >> /etc/resolv.conf`).CombinedOutput()
 	object.Close()
 	t.Log("end")
@@ -88,11 +88,11 @@ func dhcp(manager *networkmanager.Interface) {
 		return
 	}
 	for _, v := range dhc1.Options {
-		if v.Types == uint8(packet.DHCP_Requested_IP_Address) {
+		if v.Code == uint8(packet.DHCP_Requested_IP_Address) {
 			config.Address = (*packet.IPv4)(v.Value).String()
 			log.Println("Address: ", config.Address)
 		}
-		if v.Types == uint8(packet.DHCP_Router) {
+		if v.Code == uint8(packet.DHCP_Router) {
 			config.Gateway = (*packet.IPv4)(v.Value).String()
 			config.DNS = config.Gateway
 			log.Println("Gateway: ", config.Gateway)
