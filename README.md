@@ -10,7 +10,7 @@ var josnStr, config = `
 	{
 		"iface": "eth0",
 		"address": "192.168.1.58",
-		"gateway": "192.168.1.1"
+		"gateway": "192.168.1.1",
 		"dns": "192.168.1.1"
 	}
 `, &struct {

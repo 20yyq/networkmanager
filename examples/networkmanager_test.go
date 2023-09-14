@@ -1,12 +1,12 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-02-20 08:50:39
-// @ LastEditTime : 2023-07-08 15:57:36
+// @ LastEditTime : 2023-09-14 11:24:17
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Linux networkmanager 使用例子
 // @ --------------------------------------------------------------------------------<
-// @ FilePath     : /networkmanager/examples/networkmanager_test.go
+// @ FilePath     : /20yyq/networkmanager/examples/networkmanager_test.go
 // @@
 package networkmanager_test
 

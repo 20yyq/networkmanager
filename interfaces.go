@@ -1,12 +1,12 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-21 08:16:59
-// @ LastEditTime : 2023-07-08 16:08:49
+// @ LastEditTime : 2023-09-14 09:51:56
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
 // @ --------------------------------------------------------------------------------<
-// @ FilePath     : /networkmanager/interfaces.go
+// @ FilePath     : /20yyq/networkmanager/interfaces.go
 // @@
 package networkmanager
 
@@ -17,7 +17,7 @@ import (
 	"encoding/binary"
 
 	"github.com/20yyq/packet"
-	"github.com/20yyq/networkmanager/socket/rtnetlink"
+	"github.com/20yyq/netlink"
 )
 
 const (
@@ -80,9 +80,10 @@ const (
 
 type Interface struct {
 	iface	*net.Interface
-	conn 	*rtnetlink.RtnetlinkConn
+	conn 	*netlink.NetlinkRoute
 	
 	mutex 	sync.Mutex
+	req		uint32
 }
 
 func InterfaceByName(ifname string) (*Interface, error) {
@@ -91,23 +92,26 @@ func InterfaceByName(ifname string) (*Interface, error) {
 	if iface.iface, err = net.InterfaceByName(ifname); err != nil {
 		return nil, err
 	}
-	iface.conn, err = rtnetlink.NewRtnetlinkConn(iface.iface.Name, iface.iface)
-	return iface, err 
-}
-
-func (ifi *Interface) RtnetlinkConn() *rtnetlink.RtnetlinkConn {
-	return ifi.conn
+	iface.conn = &netlink.NetlinkRoute{
+		DevName: iface.iface.Name,
+		Sal: &syscall.SockaddrNetlink{Family: syscall.AF_NETLINK, Groups: syscall.RTNLGRP_LINK},
+	}
+	return iface, iface.conn.Init() 
 }
 
 func (ifi *Interface) Up() error {
 	if ifi.iface.Flags&0x01 != 0 {
 		return nil
 	}
-	nl, err := ifi.conn.Exchange(101, RTM_NEWLINK, NLM_F_ACK, 
-		(&packet.IfInfomsg{Family: AF_UNSPEC, Flags: IFF_UP, Change: IFF_UP, Index: int32(ifi.iface.Index)}).WireFormat())
+	sm := netlink.SendNLMessage{
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWLINK, Flags: syscall.NLM_F_REQUEST|NLM_F_ACK, Seq: ifi.req},
+		Data: (&packet.IfInfomsg{Family: AF_UNSPEC, Flags: IFF_UP, Change: IFF_UP, Index: int32(ifi.iface.Index)}).WireFormat(),
+	}
+	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
+	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
-		<-nl.Notify
-		if err = DeserializeNlMsgerr(nl.Message[0]); err == nil {
+		if err = DeserializeNlMsgerr(rm.MsgList[0]); err == nil {
 			ifi.iface.Flags++
 		}
 	}
@@ -118,11 +122,15 @@ func (ifi *Interface) Down() error {
 	if ifi.iface.Flags&0x01 != 1 {
 		return nil
 	}
-	nl, err := ifi.conn.Exchange(101, RTM_NEWLINK, NLM_F_ACK, 
-		(&packet.IfInfomsg{Family: AF_UNSPEC, Change: IFF_UP, Index: int32(ifi.iface.Index)}).WireFormat())
+	sm := netlink.SendNLMessage{
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWLINK, Flags: syscall.NLM_F_REQUEST|NLM_F_ACK, Seq: ifi.req},
+		Data: (&packet.IfInfomsg{Family: AF_UNSPEC, Change: IFF_UP, Index: int32(ifi.iface.Index)}).WireFormat(),
+	}
+	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
+	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
-		<-nl.Notify
-		if err = DeserializeNlMsgerr(nl.Message[0]); err == nil {
+		if err = DeserializeNlMsgerr(rm.MsgList[0]); err == nil {
 			ifi.iface.Flags--
 		}
 	}

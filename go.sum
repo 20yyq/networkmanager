@@ -1,2 +1,8 @@
+github.com/20yyq/netlink v0.0.0-20230914002310-13c1b39c67ab h1:Gxs/Pbzx6EMIqY4figXwoSV3dwy6jioNpeOO5YnnLqk=
+github.com/20yyq/netlink v0.0.0-20230914002310-13c1b39c67ab/go.mod h1:htLmHwYZx4EyslOa5kycGTfGUW7tyqZ3GVsKY1/gvy4=
+github.com/20yyq/netlink v0.0.0-20230914014947-e3925c323280 h1:ZekTNXrMSt4czrPT4lP2GgBos9encgYKHp0q/iXtooo=
+github.com/20yyq/netlink v0.0.0-20230914014947-e3925c323280/go.mod h1:htLmHwYZx4EyslOa5kycGTfGUW7tyqZ3GVsKY1/gvy4=
 github.com/20yyq/packet v0.0.1 h1:zqSY1C7X/x34ca2VAGU8RaJUOloOsy057j/6+fMZJBA=
 github.com/20yyq/packet v0.0.1/go.mod h1:5k7ru+ECywP3EpRl6ERpKlhEHLJLXCH0vUfB4Na+t8w=
+github.com/20yyq/packet v0.1.4-0.20230912082904-b8b1e62fb5ae h1:LBZweIDHUDWfmLmxhpm860fh5/ikbnJm/5aISBrXC1Y=
+github.com/20yyq/packet v0.1.4-0.20230912082904-b8b1e62fb5ae/go.mod h1:5k7ru+ECywP3EpRl6ERpKlhEHLJLXCH0vUfB4Na+t8w=

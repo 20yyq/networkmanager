@@ -1,21 +1,22 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-27 09:39:36
-// @ LastEditTime : 2023-07-08 16:08:37
+// @ LastEditTime : 2023-09-14 09:52:03
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
 // @ --------------------------------------------------------------------------------<
-// @ FilePath     : /networkmanager/address.go
+// @ FilePath     : /20yyq/networkmanager/address.go
 // @@
 package networkmanager
 
 import (
 	"net"
 	"unsafe"
+	"syscall"
 
 	"github.com/20yyq/packet"
-	"github.com/20yyq/networkmanager/socket/rtnetlink"
+	"github.com/20yyq/netlink"
 )
 
 type Addrs struct {
@@ -38,16 +39,19 @@ type cacheInfo struct {
 
 func (ifi *Interface) IPList() ([]*Addrs, error) {
 	var res []*Addrs
-	var nl *rtnetlink.NetlinkMessage
 	var err error
 	count, wait := 0, false
+	sm := netlink.SendNLMessage{
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_GETADDR, Flags: syscall.NLM_F_REQUEST|NLM_F_DUMP, Seq: ifi.req},
+		Data: (&packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)}).WireFormat(),
+	}
+	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	rm := netlink.ReceiveNLMessage{Data: make([]byte, 1024)}
 Loop:
-	nl, err = ifi.conn.Exchange(20, RTM_GETADDR, NLM_F_DUMP,
-		(&packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)}).WireFormat())
+	err = ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
-		<-nl.Notify
 		count++
-		if res, err = ifi.deserializeIfAddrmsgMessages(nl); res == nil && err == nil {
+		if res, err = ifi.deserializeIfAddrmsgMessages(&rm); res == nil && err == nil {
 			wait = true
 		}
 		if wait && 3 > count {
@@ -58,21 +62,29 @@ Loop:
 }
 
 func (ifi *Interface) AddIP(a Addrs) error {
-	data := SerializeAddrs(&a, uint32(ifi.iface.Index))
-	nl, err := ifi.conn.Exchange(101, RTM_NEWADDR, NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, data)
+	sm := netlink.SendNLMessage{
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWADDR, Flags: syscall.NLM_F_REQUEST|NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, Seq: ifi.req},
+		Data: SerializeAddrs(&a, uint32(ifi.iface.Index)),
+	}
+	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
+	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
-		<-nl.Notify
-		err = DeserializeNlMsgerr(nl.Message[0])
+		err = DeserializeNlMsgerr(rm.MsgList[0])
 	}
 	return err
 }
 
 func (ifi *Interface) RemoveIP(a Addrs) error {
-	data := SerializeAddrs(&a, uint32(ifi.iface.Index))
-	nl, err := ifi.conn.Exchange(101, RTM_DELADDR, NLM_F_ACK, data)
+	sm := netlink.SendNLMessage{
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_DELADDR, Flags: syscall.NLM_F_REQUEST|NLM_F_ACK, Seq: ifi.req},
+		Data: SerializeAddrs(&a, uint32(ifi.iface.Index)),
+	}
+	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
+	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
-		<-nl.Notify
-		err = DeserializeNlMsgerr(nl.Message[0])
+		err = DeserializeNlMsgerr(rm.MsgList[0])
 	}
 	return err
 }
@@ -83,11 +95,15 @@ func (ifi *Interface) ReplaceIP(a *Addrs) error {
 			return err
 		}
 	}
-	data := SerializeAddrs(a, uint32(ifi.iface.Index))
-	nl, err := ifi.conn.Exchange(101, RTM_NEWADDR, NLM_F_ACK|NLM_F_REPLACE, data)
+	sm := netlink.SendNLMessage{
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWADDR, Flags: syscall.NLM_F_REQUEST|NLM_F_ACK|NLM_F_REPLACE, Seq: ifi.req},
+		Data: SerializeAddrs(a, uint32(ifi.iface.Index)),
+	}
+	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	rm := netlink.ReceiveNLMessage{Data: make([]byte, 1024)}
+	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
-		<-nl.Notify
-		err = DeserializeNlMsgerr(nl.Message[0])
+		err = DeserializeNlMsgerr(rm.MsgList[0])
 	}
 	return err
 }

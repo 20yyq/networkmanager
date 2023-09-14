@@ -1,12 +1,12 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-07-01 09:08:50
-// @ LastEditTime : 2023-07-07 09:25:50
+// @ LastEditTime : 2023-09-14 11:24:37
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
 // @ --------------------------------------------------------------------------------<
-// @ FilePath     : /networkmanager/socket/socket.go
+// @ FilePath     : /20yyq/networkmanager/socket/socket.go
 // @@
 package socket
 

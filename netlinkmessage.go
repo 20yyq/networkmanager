@@ -1,28 +1,30 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-26 08:01:05
-// @ LastEditTime : 2023-07-08 15:39:34
+// @ LastEditTime : 2023-09-14 09:51:13
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
 // @ --------------------------------------------------------------------------------<
-// @ FilePath     : /networkmanager/netlinkmessage.go
+// @ FilePath     : /20yyq/networkmanager/netlinkmessage.go
 // @@
 package networkmanager
 
 import (
 	"fmt"
 	"net"
-	"sync"
 	"unsafe"
 	"syscall"
 	"encoding/binary"
 
 	"github.com/20yyq/packet"
-	"github.com/20yyq/networkmanager/socket/rtnetlink"
+	"github.com/20yyq/netlink"
 )
 
-func DeserializeNlMsgerr(nlm *syscall.NetlinkMessage) error {
+//go:linkname rtaAlignOf syscall.rtaAlignOf
+func rtaAlignOf(attrlen int) int
+
+func DeserializeNlMsgerr(nlm *packet.NetlinkMessage) error {
 	if len(nlm.Data) < packet.SizeofNlMsgerr {
 		return syscall.Errno(34)
 	}
@@ -36,21 +38,11 @@ func DeserializeNlMsgerr(nlm *syscall.NetlinkMessage) error {
 	return nil
 }
 
-type NetlinkMessage struct {
-	req 	uint32
-	pid 	uint32
-	wait 	bool
-	mutex 	sync.Mutex
-	cond	*sync.Cond
-	
-	Message []*syscall.NetlinkMessage
-}
-
-func (ifi *Interface) deserializeIfAddrmsgMessages(nlm *rtnetlink.NetlinkMessage) ([]*Addrs, error) {
+func (ifi *Interface) deserializeIfAddrmsgMessages(rm *netlink.ReceiveNLMessage) ([]*Addrs, error) {
 	var res []*Addrs
 	name := ifi.iface.Name + string([]byte{0})
-	for _, m := range nlm.Message {
-		if l, err := syscall.ParseNetlinkRouteAttr(m); err == nil {
+	for _, m := range rm.MsgList {
+		if l, err := ParseNetlinkRouteAttr(m); err == nil {
 			single := Addrs{IfAddrmsg: packet.NewIfAddrmsg(([packet.SizeofIfAddrmsg]byte)(m.Data[:packet.SizeofIfAddrmsg])), label: ""}
 			for _, v := range l {
 				switch v.Attr.Type {
@@ -82,10 +74,10 @@ func (ifi *Interface) deserializeIfAddrmsgMessages(nlm *rtnetlink.NetlinkMessage
 	return res, nil
 }
 
-func (ifi *Interface) deserializeRtMsgMessages(nlm *rtnetlink.NetlinkMessage) ([]*Routes, error) {
+func (ifi *Interface) deserializeRtMsgMessages(rm *netlink.ReceiveNLMessage) ([]*Routes, error) {
 	var res []*Routes
-	for _, m := range nlm.Message {
-		if l, err := syscall.ParseNetlinkRouteAttr(m); err == nil {
+	for _, m := range rm.MsgList {
+		if l, err := ParseNetlinkRouteAttr(m); err == nil {
 			single := Routes{
 				RtMsg: packet.NewRtMsg(([packet.SizeofRtMsg]byte)(m.Data[:packet.SizeofRtMsg])),
 				oifIdx: -9999, iifIdx: -9999,
@@ -130,4 +122,40 @@ func (ifi *Interface) deserializeRtMsgMessages(nlm *rtnetlink.NetlinkMessage) ([
 		}
 	}
 	return res, nil
+}
+
+// ParseNetlinkRouteAttr parses m's payload as an array of netlink
+// route attributes and returns the slice containing the
+// NetlinkRouteAttr structures.
+func ParseNetlinkRouteAttr(m *packet.NetlinkMessage) ([]syscall.NetlinkRouteAttr, error) {
+	var b []byte
+	switch m.Header.Type {
+	case syscall.RTM_NEWLINK, syscall.RTM_DELLINK:
+		b = m.Data[syscall.SizeofIfInfomsg:]
+	case syscall.RTM_NEWADDR, syscall.RTM_DELADDR:
+		b = m.Data[syscall.SizeofIfAddrmsg:]
+	case syscall.RTM_NEWROUTE, syscall.RTM_DELROUTE:
+		b = m.Data[syscall.SizeofRtMsg:]
+	default:
+		return nil, syscall.EINVAL
+	}
+	var attrs []syscall.NetlinkRouteAttr
+	for len(b) >= syscall.SizeofRtAttr {
+		a, vbuf, alen, err := netlinkRouteAttrAndValue(b)
+		if err != nil {
+			return nil, err
+		}
+		ra := syscall.NetlinkRouteAttr{Attr: *a, Value: vbuf[:int(a.Len)-syscall.SizeofRtAttr]}
+		attrs = append(attrs, ra)
+		b = b[alen:]
+	}
+	return attrs, nil
+}
+
+func netlinkRouteAttrAndValue(b []byte) (*syscall.RtAttr, []byte, int, error) {
+	a := (*syscall.RtAttr)(unsafe.Pointer(&b[0]))
+	if int(a.Len) < syscall.SizeofRtAttr || int(a.Len) > len(b) {
+		return nil, nil, 0, syscall.EINVAL
+	}
+	return a, b[syscall.SizeofRtAttr:], rtaAlignOf(int(a.Len)), nil
 }
