@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-27 09:38:13
-// @ LastEditTime : 2023-09-14 09:52:08
+// @ LastEditTime : 2023-09-16 16:47:14
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -34,10 +34,9 @@ func (ifi *Interface) RouteList() ([]*Routes, error) {
 	var err error
 	count, wait := 0, false
 	sm := netlink.SendNLMessage{
-		NlMsghdr: &packet.NlMsghdr{Type: RTM_GETROUTE, Flags: syscall.NLM_F_REQUEST|NLM_F_DUMP, Seq: ifi.req},
-		Data: (&packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)}).WireFormat(),
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_GETROUTE, Flags: NLM_F_REQUEST|NLM_F_DUMP, Seq: randReq()},
 	}
-	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	sm.Attrs = append(sm.Attrs, packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)})
 	rm := netlink.ReceiveNLMessage{Data: make([]byte, 1024)}
 Loop:
 	err = ifi.conn.Exchange(&sm, &rm)
@@ -56,10 +55,9 @@ Loop:
 
 func (ifi *Interface) AddRoute(r Routes) error {
 	sm := netlink.SendNLMessage{
-		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWROUTE, Flags: syscall.NLM_F_REQUEST|NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, Seq: ifi.req},
-		Data: SerializeRoutes(&r, uint32(ifi.iface.Index)),
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWROUTE, Flags: NLM_F_REQUEST|NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, Seq: randReq()},
 	}
-	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	sm.Attrs = append(sm.Attrs, SerializeRoutes(&r, uint32(ifi.iface.Index))...)
 	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
 	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
@@ -70,10 +68,9 @@ func (ifi *Interface) AddRoute(r Routes) error {
 
 func (ifi *Interface) RemoveRoute(r Routes) error {
 	sm := netlink.SendNLMessage{
-		NlMsghdr: &packet.NlMsghdr{Type: RTM_DELROUTE, Flags: syscall.NLM_F_REQUEST|NLM_F_ACK, Seq: ifi.req},
-		Data: SerializeRoutes(&r, uint32(ifi.iface.Index)),
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_DELROUTE, Flags: NLM_F_REQUEST|NLM_F_ACK, Seq: randReq()},
 	}
-	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	sm.Attrs = append(sm.Attrs, SerializeRoutes(&r, uint32(ifi.iface.Index))...)
 	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
 	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
@@ -84,10 +81,9 @@ func (ifi *Interface) RemoveRoute(r Routes) error {
 
 func (ifi *Interface) ReplaceRoute(r *Routes) error {
 	sm := netlink.SendNLMessage{
-		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWROUTE, Flags: syscall.NLM_F_REQUEST|NLM_F_ACK|NLM_F_REPLACE, Seq: ifi.req},
-		Data: SerializeRoutes(r, uint32(ifi.iface.Index)),
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWROUTE, Flags: NLM_F_REQUEST|NLM_F_ACK|NLM_F_REPLACE, Seq: randReq()},
 	}
-	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	sm.Attrs = append(sm.Attrs, SerializeRoutes(r, uint32(ifi.iface.Index))...)
 	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
 	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
@@ -96,15 +92,17 @@ func (ifi *Interface) ReplaceRoute(r *Routes) error {
 	return err
 }
 
-func SerializeRoutes(r *Routes, idx uint32) []byte {
+func SerializeRoutes(r *Routes, idx uint32) []packet.Attrs {
+	attrs := make([]packet.Attrs, 1)
 	if r.RtMsg == nil {
 		r.RtMsg = &packet.RtMsg{}
 	}
 	r.Family = AF_INET
-	data := make([]byte, packet.SizeofRtMsg)
-	data = appendSliceByte(data, RTA_OIF, binary.LittleEndian.AppendUint32(nil, idx))
+	data := binary.LittleEndian.AppendUint32(nil, idx)
+	attrs = append(attrs, packet.RtAttr{&syscall.RtAttr{uint16(len(data) + packet.SizeofRtAttr), RTA_OIF}, data})
 	if r.Priority > 0 {
-		data = appendSliceByte(data, RTA_PRIORITY, binary.LittleEndian.AppendUint32(nil, r.Priority))
+		data = binary.LittleEndian.AppendUint32(nil, r.Priority)
+		attrs = append(attrs, packet.RtAttr{&syscall.RtAttr{uint16(len(data) + packet.SizeofRtAttr), RTA_PRIORITY}, data})
 	}
 	if r.Gw != nil {
 		b := r.Gw.To4()
@@ -113,7 +111,7 @@ func SerializeRoutes(r *Routes, idx uint32) []byte {
 			r.Family = AF_INET6
 		}
 		r.Table, r.Protocol, r.Type, r.Scope = RT_TABLE_MAIN, RTPROT_BOOT, RTN_UNICAST, RT_SCOPE_UNIVERSE
-		data = appendSliceByte(data, RTA_GATEWAY, b)
+		attrs = append(attrs, packet.RtAttr{&syscall.RtAttr{uint16(len(b) + packet.SizeofRtAttr), RTA_GATEWAY}, b})
 	} else {
 		if r.Dst != nil {
 			b := r.Dst.To4()
@@ -121,7 +119,7 @@ func SerializeRoutes(r *Routes, idx uint32) []byte {
 				b = r.Dst.To16()
 				r.Family = AF_INET6
 			}
-			data = appendSliceByte(data, RTA_DST, b)
+			attrs = append(attrs, packet.RtAttr{&syscall.RtAttr{uint16(len(b) + packet.SizeofRtAttr), RTA_DST}, b})
 			dstlen, _ := r.Dst.DefaultMask().Size()
 			r.Dst_len = uint8(dstlen)
 		}
@@ -131,12 +129,11 @@ func SerializeRoutes(r *Routes, idx uint32) []byte {
 				b = r.Src.To16()
 				r.Family = AF_INET6
 			}
-			data = appendSliceByte(data, RTA_PREFSRC, b)
+			attrs = append(attrs, packet.RtAttr{&syscall.RtAttr{uint16(len(b) + packet.SizeofRtAttr), RTA_PREFSRC}, b})
 			srclen, _ := r.Src.DefaultMask().Size()
 			r.Src_len = uint8(srclen)
 		}
 	}
-	res := r.WireFormat()
-	copy(data[:packet.SizeofRtMsg], res)
-	return data
+	attrs[0] = packet.Attrs(r.RtMsg)
+	return attrs
 }

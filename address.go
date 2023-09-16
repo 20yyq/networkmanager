@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-27 09:39:36
-// @ LastEditTime : 2023-09-14 09:52:03
+// @ LastEditTime : 2023-09-16 16:46:53
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -42,10 +42,9 @@ func (ifi *Interface) IPList() ([]*Addrs, error) {
 	var err error
 	count, wait := 0, false
 	sm := netlink.SendNLMessage{
-		NlMsghdr: &packet.NlMsghdr{Type: RTM_GETADDR, Flags: syscall.NLM_F_REQUEST|NLM_F_DUMP, Seq: ifi.req},
-		Data: (&packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)}).WireFormat(),
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_GETADDR, Flags: NLM_F_REQUEST|NLM_F_DUMP, Seq: randReq()},
 	}
-	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	sm.Attrs = append(sm.Attrs, packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)})
 	rm := netlink.ReceiveNLMessage{Data: make([]byte, 1024)}
 Loop:
 	err = ifi.conn.Exchange(&sm, &rm)
@@ -63,10 +62,9 @@ Loop:
 
 func (ifi *Interface) AddIP(a Addrs) error {
 	sm := netlink.SendNLMessage{
-		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWADDR, Flags: syscall.NLM_F_REQUEST|NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, Seq: ifi.req},
-		Data: SerializeAddrs(&a, uint32(ifi.iface.Index)),
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWADDR, Flags: NLM_F_REQUEST|NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, Seq: randReq()},
 	}
-	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	sm.Attrs = append(sm.Attrs, SerializeAddrs(&a, uint32(ifi.iface.Index))...)
 	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
 	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
@@ -77,10 +75,9 @@ func (ifi *Interface) AddIP(a Addrs) error {
 
 func (ifi *Interface) RemoveIP(a Addrs) error {
 	sm := netlink.SendNLMessage{
-		NlMsghdr: &packet.NlMsghdr{Type: RTM_DELADDR, Flags: syscall.NLM_F_REQUEST|NLM_F_ACK, Seq: ifi.req},
-		Data: SerializeAddrs(&a, uint32(ifi.iface.Index)),
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_DELADDR, Flags: NLM_F_REQUEST|NLM_F_ACK, Seq: randReq()},
 	}
-	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	sm.Attrs = append(sm.Attrs, SerializeAddrs(&a, uint32(ifi.iface.Index))...)
 	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
 	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
@@ -96,10 +93,9 @@ func (ifi *Interface) ReplaceIP(a *Addrs) error {
 		}
 	}
 	sm := netlink.SendNLMessage{
-		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWADDR, Flags: syscall.NLM_F_REQUEST|NLM_F_ACK|NLM_F_REPLACE, Seq: ifi.req},
-		Data: SerializeAddrs(a, uint32(ifi.iface.Index)),
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWADDR, Flags: NLM_F_REQUEST|NLM_F_ACK|NLM_F_REPLACE, Seq: randReq()},
 	}
-	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	sm.Attrs = append(sm.Attrs, SerializeAddrs(a, uint32(ifi.iface.Index))...)
 	rm := netlink.ReceiveNLMessage{Data: make([]byte, 1024)}
 	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
@@ -108,8 +104,8 @@ func (ifi *Interface) ReplaceIP(a *Addrs) error {
 	return err
 }
 
-func SerializeAddrs(a *Addrs, idx uint32) []byte {
-	family := AF_INET
+func SerializeAddrs(a *Addrs, idx uint32) []packet.Attrs {
+	family, attrs := AF_INET, []packet.Attrs{}
 	localAddr := a.Local.To4()
 	if len(localAddr) == 0 {
 		family = AF_INET6
@@ -121,8 +117,8 @@ func SerializeAddrs(a *Addrs, idx uint32) []byte {
 		a.IfAddrmsg = &packet.IfAddrmsg{}
 	}
 	a.Prefixlen, a.Family, a.Index = uint8(prefixlen), uint8(family), idx
-	data := a.WireFormat()
-	data = appendSliceByte(data, IFA_LOCAL, localAddr)
+	attrs = append(attrs, *a.IfAddrmsg)
+	attrs = append(attrs, packet.RtAttr{&syscall.RtAttr{uint16(len(localAddr) + packet.SizeofRtAttr), IFA_LOCAL}, localAddr})
 	if a.Broadcast == nil && prefixlen < 31 {
 		broadcast := make([]byte, masklen/8)
 		for i := range localAddr {
@@ -131,16 +127,17 @@ func SerializeAddrs(a *Addrs, idx uint32) []byte {
 		a.Broadcast = net.IPv4(broadcast[0], broadcast[1], broadcast[2], broadcast[3])
 	}
 	if a.Broadcast != nil {
-		data = appendSliceByte(data, IFA_BROADCAST, a.Broadcast.To4())
+		attrs = append(attrs, packet.RtAttr{&syscall.RtAttr{uint16(len(a.Broadcast.To4()) + packet.SizeofRtAttr), IFA_BROADCAST}, a.Broadcast.To4()})
 	}
 	if a.Anycast != nil {
-		data = appendSliceByte(data, IFA_ANYCAST, a.Anycast.To4())
+		attrs = append(attrs, packet.RtAttr{&syscall.RtAttr{uint16(len(a.Anycast.To4()) + packet.SizeofRtAttr), IFA_ANYCAST}, a.Anycast.To4()})
 	}
 	if a.label != "" {
-		data = appendSliceByte(data, IFA_LABEL, []byte(a.label))
+		attrs = append(attrs, packet.RtAttr{&syscall.RtAttr{uint16(len([]byte(a.label)) + packet.SizeofRtAttr), IFA_LABEL}, []byte(a.label)})
 	}
 	if a.Cache != nil && (a.Cache.PreferredLft > 0 || a.Cache.ValidLft > 0) {
-		data = appendSliceByte(data, IFA_CACHEINFO, (*(*[16]byte)(unsafe.Pointer(a.Cache)))[:])
+		cache := (*(*[16]byte)(unsafe.Pointer(a.Cache)))[:]
+		attrs = append(attrs, packet.RtAttr{&syscall.RtAttr{uint16(len(cache) + packet.SizeofRtAttr), IFA_CACHEINFO}, cache})
 	}
-	return data
+	return attrs
 }

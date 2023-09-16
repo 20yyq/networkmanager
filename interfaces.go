@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-21 08:16:59
-// @ LastEditTime : 2023-09-14 09:51:56
+// @ LastEditTime : 2023-09-16 08:37:37
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -13,8 +13,8 @@ package networkmanager
 import (
 	"net"
 	"sync"
+	"time"
 	"syscall"
-	"encoding/binary"
 
 	"github.com/20yyq/packet"
 	"github.com/20yyq/netlink"
@@ -83,7 +83,6 @@ type Interface struct {
 	conn 	*netlink.NetlinkRoute
 	
 	mutex 	sync.Mutex
-	req		uint32
 }
 
 func InterfaceByName(ifname string) (*Interface, error) {
@@ -94,7 +93,7 @@ func InterfaceByName(ifname string) (*Interface, error) {
 	}
 	iface.conn = &netlink.NetlinkRoute{
 		DevName: iface.iface.Name,
-		Sal: &syscall.SockaddrNetlink{Family: syscall.AF_NETLINK, Groups: syscall.RTNLGRP_LINK},
+		Sal: &syscall.SockaddrNetlink{Family: AF_NETLINK, Groups: syscall.RTNLGRP_LINK},
 	}
 	return iface, iface.conn.Init() 
 }
@@ -104,15 +103,14 @@ func (ifi *Interface) Up() error {
 		return nil
 	}
 	sm := netlink.SendNLMessage{
-		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWLINK, Flags: syscall.NLM_F_REQUEST|NLM_F_ACK, Seq: ifi.req},
-		Data: (&packet.IfInfomsg{Family: AF_UNSPEC, Flags: IFF_UP, Change: IFF_UP, Index: int32(ifi.iface.Index)}).WireFormat(),
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWLINK, Flags: NLM_F_REQUEST|NLM_F_ACK, Seq: randReq()},
 	}
-	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	sm.Attrs = append(sm.Attrs, packet.IfInfomsg{Family: AF_UNSPEC, Flags: IFF_UP, Change: IFF_UP, Index: int32(ifi.iface.Index)})
 	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
 	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
 		if err = DeserializeNlMsgerr(rm.MsgList[0]); err == nil {
-			ifi.iface.Flags++
+			ifi.iface.Flags |= 0x01
 		}
 	}
 	return err
@@ -123,15 +121,14 @@ func (ifi *Interface) Down() error {
 		return nil
 	}
 	sm := netlink.SendNLMessage{
-		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWLINK, Flags: syscall.NLM_F_REQUEST|NLM_F_ACK, Seq: ifi.req},
-		Data: (&packet.IfInfomsg{Family: AF_UNSPEC, Change: IFF_UP, Index: int32(ifi.iface.Index)}).WireFormat(),
+		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWLINK, Flags: NLM_F_REQUEST|NLM_F_ACK, Seq: randReq()},
 	}
-	sm.Len = packet.SizeofNlMsghdr + uint32(len(sm.Data))
+	sm.Attrs = append(sm.Attrs, packet.IfInfomsg{Family: AF_UNSPEC, Change: IFF_UP, Index: int32(ifi.iface.Index)})
 	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
 	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
 		if err = DeserializeNlMsgerr(rm.MsgList[0]); err == nil {
-			ifi.iface.Flags--
+			ifi.iface.Flags &= 0xFFFFFFFE
 		}
 	}
 	return err
@@ -143,31 +140,6 @@ func (ifi *Interface) Close() {
 	ifi.conn.Close()
 }
 
-func RtAttrToSliceByte(types uint16, ip net.IP, ips ...net.IP) []byte {
-	var children []byte
-	if len(ips) > 0 {
-		nextIP, nextIps := ips[0], ips[1:]
-		children = RtAttrToSliceByte(types, nextIP, nextIps...)
-	}
-	l, next := uint16(SizeofRtAttr + len(ip) + len(children)), 0
-	data := make([]byte, l)
-	binary.LittleEndian.PutUint16(data[next:], l)
-	next += 2
-	binary.LittleEndian.PutUint16(data[next:], types)
-	next += 2
-	copy(data[next:], ip)
-	next += len(ip)
-	copy(data[next:], children)
-	return data
-}
-
-func appendSliceByte(data []byte, types uint16, ips ...net.IP) []byte {
-	tmp := data
-	if 0 < len(ips) {
-		res := RtAttrToSliceByte(types, ips[0], ips[1:]...)
-		data = make([]byte, len(tmp) + len(res))
-		copy(data[:len(tmp)], tmp)
-		copy(data[len(tmp):], res)
-	}
-	return data
+func randReq() uint32 {
+	return uint32(time.Now().UnixNano() & 0xFFFFFFFF)
 }

@@ -1,8 +1,6 @@
-github.com/20yyq/netlink v0.0.0-20230914002310-13c1b39c67ab h1:Gxs/Pbzx6EMIqY4figXwoSV3dwy6jioNpeOO5YnnLqk=
-github.com/20yyq/netlink v0.0.0-20230914002310-13c1b39c67ab/go.mod h1:htLmHwYZx4EyslOa5kycGTfGUW7tyqZ3GVsKY1/gvy4=
-github.com/20yyq/netlink v0.0.0-20230914014947-e3925c323280 h1:ZekTNXrMSt4czrPT4lP2GgBos9encgYKHp0q/iXtooo=
-github.com/20yyq/netlink v0.0.0-20230914014947-e3925c323280/go.mod h1:htLmHwYZx4EyslOa5kycGTfGUW7tyqZ3GVsKY1/gvy4=
-github.com/20yyq/packet v0.0.1 h1:zqSY1C7X/x34ca2VAGU8RaJUOloOsy057j/6+fMZJBA=
-github.com/20yyq/packet v0.0.1/go.mod h1:5k7ru+ECywP3EpRl6ERpKlhEHLJLXCH0vUfB4Na+t8w=
-github.com/20yyq/packet v0.1.4-0.20230912082904-b8b1e62fb5ae h1:LBZweIDHUDWfmLmxhpm860fh5/ikbnJm/5aISBrXC1Y=
-github.com/20yyq/packet v0.1.4-0.20230912082904-b8b1e62fb5ae/go.mod h1:5k7ru+ECywP3EpRl6ERpKlhEHLJLXCH0vUfB4Na+t8w=
+github.com/20yyq/netlink v0.0.0-20230916012726-081eed4e0df7 h1:BV96VUFCfQapg+VtuwE1ad6faX+Eu/744HwDqUwMp7I=
+github.com/20yyq/netlink v0.0.0-20230916012726-081eed4e0df7/go.mod h1:u8T5mH3H5NzpnVqRkevQxv3rGAWM7LdOADBj1IsXVF0=
+github.com/20yyq/packet v0.1.4-0.20230916072213-3666895fc50a h1:E97E1zN2lG3Z0gbxWySJVCmcTVcewsmbLCxz4To6x1U=
+github.com/20yyq/packet v0.1.4-0.20230916072213-3666895fc50a/go.mod h1:A4zhpIl5kFE5oP65EQi/IkTn3xqo3smzZ6yqiBaxl7I=
+golang.org/x/sys v0.12.0 h1:CM0HF96J0hcLAwsHPJZjfdNzs0gftsLfgKt57wWHJ0o=
+golang.org/x/sys v0.12.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
