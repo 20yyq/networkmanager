@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-26 08:01:05
-// @ LastEditTime : 2023-09-16 08:15:32
+// @ LastEditTime : 2023-09-20 14:03:12
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -37,8 +37,10 @@ func DeserializeNlMsgerr(nlm *packet.NetlinkMessage) error {
 
 func (ifi *Interface) deserializeIfAddrmsgMessages(rm *netlink.ReceiveNLMessage) ([]*Addrs, error) {
 	var res []*Addrs
-	name := ifi.iface.Name + string([]byte{0})
-	for _, m := range rm.MsgList {
+	var m *packet.NetlinkMessage
+	name, l := ifi.iface.Name + string([]byte{0}), len(rm.MsgList)
+	for i := 0; i < l; i++ {
+		m = rm.MsgList[i]
 		if l, err := packet.ParseNetlinkRouteAttr(m); err == nil {
 			single := Addrs{IfAddrmsg: packet.NewIfAddrmsg(([packet.SizeofIfAddrmsg]byte)(m.Data[:packet.SizeofIfAddrmsg])), label: ""}
 			for _, v := range l {
@@ -64,7 +66,7 @@ func (ifi *Interface) deserializeIfAddrmsgMessages(rm *netlink.ReceiveNLMessage)
 			}
 			continue
 		}
-		if 1 > len(res) {
+		if i == l - 1 && 0 == len(res) {
 			return nil, DeserializeNlMsgerr(m)
 		}
 	}
@@ -73,7 +75,10 @@ func (ifi *Interface) deserializeIfAddrmsgMessages(rm *netlink.ReceiveNLMessage)
 
 func (ifi *Interface) deserializeRtMsgMessages(rm *netlink.ReceiveNLMessage) ([]*Routes, error) {
 	var res []*Routes
-	for _, m := range rm.MsgList {
+	var m *packet.NetlinkMessage
+	l := len(rm.MsgList)
+	for i := 0; i < l; i++ {
+		m = rm.MsgList[i]
 		if l, err := packet.ParseNetlinkRouteAttr(m); err == nil {
 			single := Routes{
 				RtMsg: packet.NewRtMsg(([packet.SizeofRtMsg]byte)(m.Data[:packet.SizeofRtMsg])),
@@ -114,7 +119,7 @@ func (ifi *Interface) deserializeRtMsgMessages(rm *netlink.ReceiveNLMessage) ([]
 			}
 			continue
 		}
-		if 1 > len(res) {
+		if i == l - 1 && 0 == len(res) {
 			return nil, DeserializeNlMsgerr(m)
 		}
 	}

@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-27 09:38:13
-// @ LastEditTime : 2023-09-16 16:47:14
+// @ LastEditTime : 2023-09-20 11:33:14
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -30,26 +30,16 @@ type Routes struct {
 }
 
 func (ifi *Interface) RouteList() ([]*Routes, error) {
-	var res []*Routes
 	var err error
-	count, wait := 0, false
 	sm := netlink.SendNLMessage{
 		NlMsghdr: &packet.NlMsghdr{Type: RTM_GETROUTE, Flags: NLM_F_REQUEST|NLM_F_DUMP, Seq: randReq()},
 	}
 	sm.Attrs = append(sm.Attrs, packet.IfInfomsg{Family: AF_UNSPEC, Index: int32(ifi.iface.Index)})
 	rm := netlink.ReceiveNLMessage{Data: make([]byte, 1024)}
-Loop:
-	err = ifi.conn.Exchange(&sm, &rm)
-	if err == nil {
-		count++
-		if res, err = ifi.deserializeRtMsgMessages(&rm); res == nil && err == nil {
-			wait = true
-		}
-		if wait && 3 > count {
-			goto Loop
-		}
+	if err = ifi.conn.Exchange(&sm, &rm); err == nil {
+		return ifi.deserializeRtMsgMessages(&rm)
 	}
-	return res, err
+	return nil, err
 
 }
 
@@ -58,10 +48,12 @@ func (ifi *Interface) AddRoute(r Routes) error {
 		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWROUTE, Flags: NLM_F_REQUEST|NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK, Seq: randReq()},
 	}
 	sm.Attrs = append(sm.Attrs, SerializeRoutes(&r, uint32(ifi.iface.Index))...)
-	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
+	rm := netlink.ReceiveNLMessage{Data: make([]byte, 1024)}
 	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
-		err = DeserializeNlMsgerr(rm.MsgList[0])
+		if rm.MsgList[0].Header.Type != RTM_NEWROUTE {
+			err = DeserializeNlMsgerr(rm.MsgList[0])
+		}
 	}
 	return err
 }
@@ -71,10 +63,12 @@ func (ifi *Interface) RemoveRoute(r Routes) error {
 		NlMsghdr: &packet.NlMsghdr{Type: RTM_DELROUTE, Flags: NLM_F_REQUEST|NLM_F_ACK, Seq: randReq()},
 	}
 	sm.Attrs = append(sm.Attrs, SerializeRoutes(&r, uint32(ifi.iface.Index))...)
-	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
+	rm := netlink.ReceiveNLMessage{Data: make([]byte, 1024)}
 	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
-		err = DeserializeNlMsgerr(rm.MsgList[0])
+		if rm.MsgList[0].Header.Type != RTM_DELROUTE {
+			err = DeserializeNlMsgerr(rm.MsgList[0])
+		}
 	}
 	return err
 }
@@ -84,10 +78,12 @@ func (ifi *Interface) ReplaceRoute(r *Routes) error {
 		NlMsghdr: &packet.NlMsghdr{Type: RTM_NEWROUTE, Flags: NLM_F_REQUEST|NLM_F_ACK|NLM_F_REPLACE, Seq: randReq()},
 	}
 	sm.Attrs = append(sm.Attrs, SerializeRoutes(r, uint32(ifi.iface.Index))...)
-	rm := netlink.ReceiveNLMessage{Data: make([]byte, 128)}
+	rm := netlink.ReceiveNLMessage{Data: make([]byte, 1024)}
 	err := ifi.conn.Exchange(&sm, &rm)
 	if err == nil {
-		err = DeserializeNlMsgerr(rm.MsgList[0])
+		if rm.MsgList[0].Header.Type != RTM_NEWROUTE {
+			err = DeserializeNlMsgerr(rm.MsgList[0])
+		}
 	}
 	return err
 }

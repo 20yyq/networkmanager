@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2023-06-29 15:13:47
-// @ LastEditTime : 2023-09-14 11:24:40
+// @ LastEditTime : 2023-09-20 08:29:53
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : 
@@ -74,7 +74,7 @@ LOOP:
 	if err != nil {
 		return nil, err
 	}
-	offer = packet.NewDhcpV4Packet(b[:n])
+	*offer = packet.NewDhcpV4Packet(b[:n])
 	if offer.XID != v4.xid && 15 > count {
 		time.Sleep(time.Second)
 		goto LOOP
@@ -101,7 +101,7 @@ LOOP:
 	if err != nil {
 		return nil, err
 	}
-	ack = packet.NewDhcpV4Packet(b[:n])
+	*ack = packet.NewDhcpV4Packet(b[:n])
 	if ack.XID != v4.xid && 15 > count {
 		time.Sleep(time.Second)
 		goto LOOP
