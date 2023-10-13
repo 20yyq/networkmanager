@@ -1,32 +1,31 @@
 // @@
-// @ Author       : Eacher
-// @ Date         : 2023-06-29 15:13:47
-// @ LastEditTime : 2023-09-14 11:24:45
-// @ LastEditors  : Eacher
+// @ Author       	: Eacher
+// @ Date         	: 2023-06-29 15:13:47
+// @ LastEditTime   : 2023-10-13 11:44:51
+// @ LastEditors    : Eacher
 // @ --------------------------------------------------------------------------------<
-// @ Description  : 
+// @ Description  	:
 // @ --------------------------------------------------------------------------------<
-// @ FilePath     : /20yyq/networkmanager/socket/arp/arp.go
+// @ FilePath       : /20yyq/networkmanager/socket/arp/arp.go
 // @@
 package arp
 
 import (
 	"net"
-	"time"
 	"syscall"
+	"time"
 
 	"encoding/binary"
 
-	"github.com/20yyq/packet"
 	"github.com/20yyq/networkmanager/socket"
+	"github.com/20yyq/packet"
 )
 
 const (
-	ETH_P_ARP 	= syscall.ETH_P_ARP
-	ETH_P_IP 	= syscall.ETH_P_IP
-	ETH_P_IPV6 	= syscall.ETH_P_IPV6
+	ETH_P_ARP  = syscall.ETH_P_ARP
+	ETH_P_IP   = syscall.ETH_P_IP
+	ETH_P_IPV6 = syscall.ETH_P_IPV6
 
-	ETH_P_8021AD= syscall.ETH_P_8021AD
 	ETH_P_8021Q = syscall.ETH_P_8021Q
 )
 
@@ -34,8 +33,8 @@ type ArpConn struct {
 	*socket.Socket
 
 	control socket.RawConnControl
-	lsa 	*syscall.SockaddrLinklayer
-	addr 	net.IP
+	lsa     *syscall.SockaddrLinklayer
+	addr    net.IP
 }
 
 func NewArpConn(name string, ifi *net.Interface) (*ArpConn, error) {
@@ -84,13 +83,12 @@ func (ac *ArpConn) Write(b []byte) error {
 
 func (ac *ArpConn) Request(ip net.IP) error {
 	arpp := &packet.ArpPacket{
-		HeadMAC: [2]packet.HardwareAddr{packet.Broadcast, (packet.HardwareAddr)(ac.lsa.Addr[:ac.lsa.Halen])},
-		FrameType: ETH_P_ARP, HardwareType: packet.ARP_ETHERNETTYPE, ProtocolType: ETH_P_IP,
+		HardwareType: packet.ARP_ETHERNETTYPE, ProtocolType: ETH_P_IP,
 		HardwareLen: 6, IPLen: 4, Operation: packet.ARP_REQUEST,
-		SendHardware: ([6]byte)(ac.lsa.Addr[:ac.lsa.Halen]),
-		SendIP: packet.IPv4{},
+		SendHardware:   ([6]byte)(ac.lsa.Addr[:ac.lsa.Halen]),
+		SendIP:         packet.IPv4{},
 		TargetHardware: packet.Broadcast,
-		TargetIP: ([4]byte)(ip.To4()),
+		TargetIP:       ([4]byte)(ip.To4()),
 	}
 	if ac.addr.To4() != nil {
 		arpp.SendIP = ([4]byte)(ac.addr.To4())
@@ -98,24 +96,24 @@ func (ac *ArpConn) Request(ip net.IP) error {
 	return ac.Write(arpp.WireFormat())
 }
 
-func (ac *ArpConn) GetAllIPMAC(out time.Duration) []*packet.ArpPacket {
+func (ac *ArpConn) GetAllIPMAC(out time.Duration) []packet.ArpPacket {
 	b := make([]byte, 128)
 	n, _ := ac.Read(b)
-	go func(p *packet.ArpPacket) {
+	go func(p packet.ArpPacket) {
 		for i := 0; i < 255; i++ {
 			p.SendIP[3] = byte(i)
 			ac.Request(net.IP(p.SendIP[:]))
 		}
-	}(packet.NewArpPacket(([42]byte)(b[:n])))
-	var list []*packet.ArpPacket
+	}(packet.NewArpPacket(([packet.SizeofArpPacket]byte)(b[:n])))
+	var list []packet.ArpPacket
 	over := false
-	timer := time.AfterFunc(out, func () { over = true; })
+	timer := time.AfterFunc(out, func() { over = true })
 	for !over {
 		n, err := ac.Read(b)
 		if err != nil {
 			break
 		}
-		p := packet.NewArpPacket(([42]byte)(b[:n]))
+		p := packet.NewArpPacket(([packet.SizeofArpPacket]byte)(b[:n]))
 		if p.Operation == 2 {
 			timer.Reset(out)
 			list = append(list, p)
